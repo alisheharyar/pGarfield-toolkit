@@ -1,0 +1,12 @@
+#!/bin/sh
+#SBATCH -J DemoJob
+#SBATCH -p l_short
+#SBATCH --qos=ls
+#SBATCH --time=00:30:00
+#SBATCH --ntasks=24
+#SBATCH --output=DemoJob.o%j
+#SBATCH --error=DemoJob.e%j
+#SBATCH --hint=nomultithread
+
+source env.sh
+srun ./gem --card card.ini
