@@ -1,3 +1,8 @@
+/**
+   @author Ali Sheharyar
+   @organization Texas A&M University at Qatar
+*/
+
 #include <mpi.h>
 
 #include <iostream>

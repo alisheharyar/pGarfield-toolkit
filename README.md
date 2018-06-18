@@ -35,4 +35,6 @@ mpirun -np 16 ./program --card card.ini
 ```
 
 ## Information
-Send questions and comments to: Ali Sheharyar ali.sheharyar@gmail.com
+The optimizations added to speedup the CERN's implementation of the Garfield++ has been described in the NIMA 901 (2018) journal at pages 92-98. Direct link to the article is https://www.sciencedirect.com/science/article/pii/S0168900218306806
+
+Send questions and comments to: Ali Sheharyar (ali.sheharyar@qatar.tamu.edu) or Othmane Bouhali (othmane.bouhali@qatar.tamu.edu)

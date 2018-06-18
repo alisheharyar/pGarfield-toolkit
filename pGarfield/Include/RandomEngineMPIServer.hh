@@ -1,3 +1,9 @@
+/**
+   This class is used to produce the random numbers over the MPI
+   @author Ali Sheharyar
+   @organization Texas A&M University at Qatar
+*/
+
 #ifndef G_RANDOM_ENGINE_MPI_SERVER_H
 #define G_RANDOM_ENGINE_MPI_SERVER_H
 
