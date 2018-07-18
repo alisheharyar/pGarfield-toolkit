@@ -4,13 +4,24 @@
 #define G_RANDOM_H
 
 #include <cmath>
-#include "RandomEngineRoot.hh"
+
 #include "FundamentalConstants.hh"
+
+
+#ifdef PARALLEL
+#include "RandomEngineMPI.hh"
+#else
+#include "RandomEngineRoot.hh"
+#endif
 
 namespace Garfield {
 
 // Random number generator
+#ifdef PARALLEL
+extern RandomEngineMPI randomEngine;
+#else
 extern RandomEngineRoot randomEngine;
+#endif
 
 // Draw a random number uniformly distributed in the range [0, 1)
 inline double RndmUniform() { return randomEngine.Draw(); }

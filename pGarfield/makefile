@@ -23,13 +23,11 @@ TARGETS = $(OBJECTS)
 TARGETS += heed
 
 # Fortran compiler
-FC = ifort
-
-CXX = icc
+FC = gfortran
 
 # C++ compiler if parallel mode is enabled
 ifdef PARALLEL
-CXX = mpiicc
+CXX = mpicxx
 endif
 
 # Compilation flags
@@ -39,7 +37,7 @@ CFLAGS = -Wall -Wextra -pedantic -ansi -Wabi -Wno-long-long -Woverloaded-virtual
 	-I$(INCDIR) -I$(HEEDDIR) -DINS_CRETURN 
 
 ifdef PARALLEL
-CFLAGS += -DPARALLEL -DMPICH_IGNORE_CXX_SEEK
+CFLAGS += -DPARALLEL
 endif
 
 FFLAGS = -fpic -c

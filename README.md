@@ -12,7 +12,7 @@ ROOT v5.34.36 or later
 ```
 
 ## Compiling
-Note: The makefile uses the Intel C++ compilers (icc/mpicc) and Intel MPI. Make sure the intel compiler is accessible before compiling. Make changes to use a different C++ compiler as desired.
+Note: The pGarfield has been tested with the GNU compiler (5.3.0) with Intel MPI (17.1.132). Modify the makefile to use a different compiler as desired.
 
 1) Build pGarfield-sim
 ```
@@ -23,7 +23,7 @@ cd <pgarfield_sim_source_dir>
 PARALLEL=1 make
 ```
 
-Note that running just make command will produce the serial version of the Garfield. The flag PARALLEL=1 enables enables the MPI support and also links with the system MPI header files and libraries.
+Note that running just make command (without the PARALLEL=1 flag) will produce the serial version of the Garfield. The flag PARALLEL=1 enables the MPI support and also links with the system MPI header files and libraries.
 
 
 ## Documentation
