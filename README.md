@@ -12,7 +12,7 @@ ROOT v5.34.36 or later
 ```
 
 ## Compiling
-Note: The pGarfield has been tested with the GNU compiler (5.3.0) with Intel MPI (17.1.132). Modify the makefile to use a different compiler as desired.
+Note: The pGarfield has been tested with the GNU compiler (5.3.0) with Intel MPI (17.1.132) on Cray XC40AC HPC system. Modify the makefile to use a different compiler as desired.
 
 1) Build pGarfield-sim
 ```
