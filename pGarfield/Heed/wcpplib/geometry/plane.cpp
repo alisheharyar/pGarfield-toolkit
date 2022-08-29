@@ -1,4 +1,5 @@
 #include "wcpplib/geometry/plane.h"
+#include "wcpplib/geometry/polyline.h"
 /*
 Copyright (c) 2000 Igor B. Smirnov
 
@@ -15,11 +16,11 @@ namespace Heed {
 
 // **** plane ****
 
-absref absref::*(plane::aref[2]) = {(absref absref::*)&plane::piv,
-                                    (absref absref::*)&plane::dir };
+absref absref::* plane::aref[2] = {(absref absref::*)&plane::piv,
+                                   (absref absref::*)&plane::dir};
 
-void plane::get_components(ActivePtr<absref_transmit>& aref_tran) {
-  aref_tran.pass(new absref_transmit(2, aref));
+absref_transmit plane::get_components() {
+  return absref_transmit(2, aref);
 }
 
 plane::plane(const straight& sl, const point& pt) : piv(sl.Gpiv()), dir() {
@@ -38,8 +39,8 @@ plane::plane(const straight& sl1, const straight& sl2, vfloat prec)
   if (vecerror == 0) {
     piv = pt;
     dir = unit_vec(sl1.Gdir() || sl2.Gdir());
-  } else if (vecerror == 2)  // different parallel lines
-      {
+  } else if (vecerror == 2) { 
+    // different parallel lines
     vecerror = 0;
     dir = unit_vec(sl1.Gdir() || (sl2.Gpiv() - sl1.Gpiv()));
   }
@@ -57,14 +58,11 @@ int operator==(const plane& pl1, const plane& pl2) {
     return 0;
 }
 
-int apeq(const plane& pl1, const plane& pl2, vfloat prec) {
-  pvecerror("int apeq(const plane &pl1, const plane &pl2, vfloat prec)");
-  if (check_par(pl1.dir, pl2.dir, prec) == 0) return 0;
-  if (apeq(pl1.piv, pl2.piv, prec) == 1) return 1;
-  if (pl1.check_point_in(pl2.piv, prec) == 1)
-    return 1;
-  else
-    return 0;
+bool apeq(const plane& pl1, const plane& pl2, vfloat prec) {
+  pvecerror("bool apeq(const plane &pl1, const plane &pl2, vfloat prec)");
+  if (check_par(pl1.dir, pl2.dir, prec) == 0) return false;
+  if (apeq(pl1.piv, pl2.piv, prec)) return true;
+  return (pl1.check_point_in(pl2.piv, prec) == 1);
 }
 
 int plane::check_point_in(const point& fp, vfloat prec) const {
@@ -97,9 +95,10 @@ straight plane::cross(const plane& pl) const {
   pvecerror("point plane::cross(plane &pl)");
   point plpiv = pl.Gpiv();
   vec pldir = pl.Gdir();
-  vec a = dir || pldir;  //direction of the overall straight lines
-  if (length(a) == 0) {
-    if (plpiv == piv || check_par(pldir, dir, 0.0) != 0) {  // planes coinsides
+  vec a = dir || pldir;  // direction of the overall straight lines
+  if (a.length() == 0) {
+    if (plpiv == piv || check_par(pldir, dir, 0.0) != 0) {  
+      // planes coincide
       vecerror = 3;
       return straight();
     } else {
@@ -108,20 +107,19 @@ straight plane::cross(const plane& pl) const {
     }
   }
   a = unit_vec(a);
-  vec c = a || dir;  //perpend. for ov. str.
+  vec c = a || dir;  // perpend. for ov. str.
   straight st(piv, c);
-  point pt = pl.cross(st);  //one point on ov. str.
-  return straight(pt, a);   //overall straight
+  point pt = pl.cross(st);  // one point on ov. str.
+  return straight(pt, a);  // overall straight
 }
 
 int plane::cross(const polyline& pll, point* crpt, int& qcrpt, polyline* crpll,
                  int& qcrpll, vfloat prec) const {
   pvecerror("int plane::cross(polyline &pll, ...");
 
-  int n;
   qcrpt = 0;
   qcrpll = 0;
-  for (n = 0; n < pll.qsl; n++) {
+  for (int n = 0; n < pll.qsl; n++) {
     point cpt = cross(pll.sl[n]);
     if (vecerror == 3)  // the line is in the plane
       crpll[qcrpll++] = polyline(&(pll.pt[n]), 2);
@@ -129,14 +127,14 @@ int plane::cross(const polyline& pll, point* crpt, int& qcrpt, polyline* crpll,
       vecerror = 0;
     else {
       vec v1 = cpt - pll.pt[n];
-      if (length(v1) < prec) {
-        if (n == 0)  // otherwise it is probably included on the previous step
-            {
+      if (v1.length() < prec) {
+        if (n == 0) { 
+          // otherwise it is probably included on the previous step
           crpt[qcrpt++] = cpt;
         }
       } else {
         vec v2 = cpt - pll.pt[n + 1];
-        if (length(v2) < prec)
+        if (v2.length() < prec)
           crpt[qcrpt++] = cpt;
         else if (check_par(v1, v2, prec) == -1)
           // anti-parallel vectors, point inside borders
@@ -154,7 +152,7 @@ vfloat plane::distance(const point& fpt) const {
   pvecerror("vfloat plane::distance(point& fpt)");
   if (fpt == piv) return 0.0;
   vec v = fpt - piv;
-  return abslt(v * dir);  // relys that dir is unit length vector
+  return fabs(v * dir);  // dir is unit length vector
 }
 
 std::ostream& operator<<(std::ostream& file, const plane& pl) {
@@ -164,5 +162,4 @@ std::ostream& operator<<(std::ostream& file, const plane& pl) {
   indn.n -= 2;
   return file;
 }
-
 }

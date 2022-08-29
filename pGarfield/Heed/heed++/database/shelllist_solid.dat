@@ -23,8 +23,8 @@ The file is generated automatically by some program with some hand corrections.
  		10	3	0	! the others 
 # 6 3  C
  		284.2	2	0.0028	! 1s 
- 		8.9	2	0	! 2s 
- 		8.9	2	0	! 2p1/2 
+ 		5.5	2	0	! 2s 
+ 		5.5	2	0	! 2p1/2 
 # 7 3  N
  		409.9	2	0.0052	! 1s 
  		37.3	2	0	! 2s 
@@ -214,7 +214,7 @@ The file is generated automatically by some program with some hand corrections.
  		100	4	0	! 3p3/2 
  		18.7	4	0	! 3d3/2 
  		18.7	6	0	! 3d5/2 
- 		10	3	0	! the others 
+ 		1.42	3	0	! the others 
 # 32 10  Ge
  		11103	2	0.535	! 1s 
  		1414.6	2	0.0024	! 2s 
@@ -236,7 +236,7 @@ The file is generated automatically by some program with some hand corrections.
  		141.2	4	0	! 3p3/2 
  		41.7	4	0	! 3d3/2 
  		41.7	6	0	! 3d5/2 
- 		10	5	0	! the others 
+ 		1.42	5	0	! the others 
 # 34 10  Se
  		12658	2	0.589	! 1s 
  		1652	2	0.0032	! 2s 
@@ -441,7 +441,7 @@ The file is generated automatically by some program with some hand corrections.
  		63.9	4	0	! 4p3/2 
  		11.7	4	0	! 4d3/2 
  		10.7	6	0	! 4d5/2 
- 		10	2	0	! the others 
+ 		1.44	2	0	! the others 
 # 49 15  In
  		27940	2	0.853	! 1s 
  		4238	2	0.02	! 2s 
@@ -505,7 +505,7 @@ The file is generated automatically by some program with some hand corrections.
  		103.3	4	0	! 4p3/2 
  		41.9	4	0	! 4d3/2 
  		40.4	6	0	! 4d5/2 
- 		10	6	0	! the others 
+ 		1.44	6	0	! the others 
 # 53 15  I
  		33169	2	0.884	! 1s 
  		5188	2	0.044	! 2s 

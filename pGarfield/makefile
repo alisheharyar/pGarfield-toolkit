@@ -1,8 +1,11 @@
 OBJDIR = $(GARFIELD_HOME)/Object
 SRCDIR = $(GARFIELD_HOME)/Source
-INCDIR = $(GARFIELD_HOME)/Include
+INCDIR = $(GARFIELD_HOME)/Include/Garfield
 LIBDIR = $(GARFIELD_HOME)/Library
 HEEDDIR = $(GARFIELD_HOME)/Heed
+MAGDIR = $(GARFIELD_HOME)/Magboltz
+INCDIR_FLAG = $(GARFIELD_HOME)/Include
+NEBDIR_FLAG = $(GARFIELD_HOME)/NeBem
 
 HEADERS = $(wildcard $(INCDIR)/*.hh)
 
@@ -34,7 +37,7 @@ endif
 CFLAGS = -Wall -Wextra -pedantic -ansi -Wabi -Wno-long-long -Woverloaded-virtual \
 	 `root-config --cflags` \
         -fpic -fno-common -c \
-	-I$(INCDIR) -I$(HEEDDIR) -DINS_CRETURN 
+	-I$(INCDIR_FLAG) -I$(NEBDIR_FLAG) -I$(HEEDDIR) -DINS_CRETURN 
 
 ifdef PARALLEL
 CFLAGS += -DPARALLEL
@@ -59,6 +62,8 @@ print-%  : ; @echo $* = $($*)
 # Linking flags
 LDFLAGS = `root-config --glibs` `root-config --ldflags`-lGeom \
 	-lgfortran -lm
+LDFLAGS+= --evelibs` -lz
+LDFLAGS+= --no-relax
 
 all:	$(TARGETS)
 	@echo Creating library libGarfield...
@@ -94,6 +99,14 @@ clean:
 	@echo Removing dictionary...
 	@$(RM) $(SRCDIR)/GarfieldDict.C 
 
+$(OBJDIR)/AvalancheGrid.o: \
+	$(SRCDIR)/AvalancheGrid.cc \
+	$(INCDIR)/AvalancheGrid.hh \
+	$(INCDIR)/FundamentalConstants.hh $(INCDIR)/GarfieldConstants.hh \
+	$(INCDIR)/Random.hh \
+	$(INCDIR)/Sensor.hh $(INCDIR)/Medium.hh $(INCDIR)/ViewDrift.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/AvalancheMicroscopic.o: \
 	$(SRCDIR)/AvalancheMicroscopic.cc \
 	$(INCDIR)/AvalancheMicroscopic.hh \
@@ -135,7 +148,18 @@ $(OBJDIR)/TrackSimple.o: \
 	$(SRCDIR)/TrackSimple.cc $(INCDIR)/TrackSimple.hh \
 	$(INCDIR)/Track.hh $(SRCDIR)/Track.cc
 	@echo $@
-	@$(CXX) $(CFLAGS) $< -o $@        
+	@$(CXX) $(CFLAGS) $< -o $@  
+$(OBJDIR)/TrackTrim.o: \
+	$(SRCDIR)/TrackTrim.cc $(INCDIR)/TrackTrim.hh \
+	$(INCDIR)/Sensor.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@  
+$(OBJDIR)/TrackSrim.o: \
+	$(SRCDIR)/TrackSrim.cc $(INCDIR)/TrackSrim.hh \
+  $(INCDIR)/FundamentalConstants.hh \
+	$(INCDIR)/Sensor.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@     
 $(OBJDIR)/TrackHeed.o: \
 	$(SRCDIR)/TrackHeed.cc $(INCDIR)/TrackHeed.hh \
 	$(INCDIR)/Track.hh $(SRCDIR)/Track.cc \
@@ -148,35 +172,35 @@ $(OBJDIR)/TrackElectron.o: \
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 
-$(OBJDIR)/ComponentBase.o: \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh \
+$(OBJDIR)/Component.o: \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh \
 	$(INCDIR)/Medium.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/ComponentConstant.o: \
 	$(SRCDIR)/ComponentConstant.cc $(INCDIR)/ComponentConstant.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/ComponentUser.o: \
 	$(SRCDIR)/ComponentUser.cc $(INCDIR)/ComponentUser.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@       
 $(OBJDIR)/ComponentAnalyticField.o: \
 	$(SRCDIR)/ComponentAnalyticField.cc \
 	$(INCDIR)/ComponentAnalyticField.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/ComponentNeBem2d.o: \
 	$(SRCDIR)/ComponentNeBem2d.cc $(INCDIR)/ComponentNeBem2d.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@        
 $(OBJDIR)/ComponentFieldMap.o: \
 	$(SRCDIR)/ComponentFieldMap.cc $(INCDIR)/ComponentFieldMap.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/ComponentAnsys121.o: \
@@ -201,22 +225,57 @@ $(OBJDIR)/ComponentElmer.o: \
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/ComponentTcad2d.o: \
 	$(SRCDIR)/ComponentTcad2d.cc $(INCDIR)/ComponentTcad2d.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@   
 $(OBJDIR)/ComponentTcad3d.o: \
 	$(SRCDIR)/ComponentTcad3d.cc $(INCDIR)/ComponentTcad3d.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@   
 $(OBJDIR)/ComponentVoxel.o: \
 	$(SRCDIR)/ComponentVoxel.cc $(INCDIR)/ComponentVoxel.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/ComponentTcadBase.o: \
+	$(SRCDIR)/ComponentTcadBase.cc $(INCDIR)/ComponentTcadBase.hh \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@   
+$(OBJDIR)/ComponentParallelPlate.o: \
+	$(SRCDIR)/ComponentParallelPlate.cc $(INCDIR)/ComponentParallelPlate.hh \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@ 
+$(OBJDIR)/ComponentNeBem3dMap.o: \
+	$(SRCDIR)/ComponentNeBem3dMap.cc $(INCDIR)/ComponentNeBem3dMap.hh \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@ 
+$(OBJDIR)/ComponentNeBem3d.o: \
+	$(SRCDIR)/ComponentNeBem3d.cc $(INCDIR)/ComponentNeBem3d.hh \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@    
+$(OBJDIR)/ComponentGrid.o: \
+	$(SRCDIR)/ComponentGrid.cc $(INCDIR)/ComponentGrid.hh \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@ 
+$(OBJDIR)/ComponentElmer2d.o: \
+	$(SRCDIR)/ComponentElmer2d.cc $(INCDIR)/ComponentElmer2d.hh \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@  
+$(OBJDIR)/ComponentComsol.o: \
+	$(SRCDIR)/ComponentComsol.cc $(INCDIR)/ComponentComsol.hh \
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@       
 $(OBJDIR)/ComponentUserMapBase.o: \
 	$(SRCDIR)/ComponentUserMapBase.cc $(INCDIR)/ComponentUserMapBase.hh \
-	$(SRCDIR)/ComponentBase.cc $(INCDIR)/ComponentBase.hh
+	$(SRCDIR)/Component.cc $(INCDIR)/Component.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@    
 	
@@ -249,6 +308,11 @@ $(OBJDIR)/ViewMedium.o: \
 	$(INCDIR)/Medium.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/ViewIsochrons.o: \
+	$(SRCDIR)/ViewIsochrons.cc $(INCDIR)/ViewIsochrons.hh \
+	$(INCDIR)/Sensor.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/ViewSignal.o: \
 	$(SRCDIR)/ViewSignal.cc $(INCDIR)/ViewSignal.hh \
 	$(INCDIR)/Sensor.hh
@@ -257,6 +321,11 @@ $(OBJDIR)/ViewSignal.o: \
 $(OBJDIR)/ViewCell.o: \
 	$(SRCDIR)/ViewCell.cc $(INCDIR)/ViewCell.hh \
 	$(INCDIR)/ComponentAnalyticField.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/ViewBase.o: \
+	$(SRCDIR)/ViewBase.cc $(INCDIR)/ViewBase.hh \
+	$(INCDIR)/Sensor.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/ViewGeometry.o: \
@@ -283,15 +352,9 @@ $(OBJDIR)/MediumMagboltz.o: \
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/magboltz.o: \
-	$(SRCDIR)/magboltz-9.01.f
+	$(MAGDIR)/magboltz.f
 	@echo $@
 	@$(FC) $(FFLAGS) $< -o $@
-$(OBJDIR)/MediumSilicon.o: \
-	$(SRCDIR)/MediumSilicon.cc $(INCDIR)/MediumSilicon.hh \
-	$(SRCDIR)/Medium.cc $(INCDIR)/Medium.hh \
-	$(INCDIR)/FundamentalConstants.hh
-	@echo $@
-	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/MediumCdTe.o: \
 	$(SRCDIR)/MediumCdTe.cc $(INCDIR)/MediumCdTe.hh \
 	$(SRCDIR)/Medium.cc $(INCDIR)/Medium.hh \
@@ -300,6 +363,24 @@ $(OBJDIR)/MediumCdTe.o: \
 	@$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/MediumGaAs.o: \
 	$(SRCDIR)/MediumGaAs.cc $(INCDIR)/MediumGaAs.hh \
+	$(SRCDIR)/Medium.cc $(INCDIR)/Medium.hh \
+	$(INCDIR)/FundamentalConstants.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/MediumGaN.o: \
+	$(SRCDIR)/MediumGaN.cc $(INCDIR)/MediumGaN.hh \
+	$(SRCDIR)/Medium.cc $(INCDIR)/Medium.hh \
+	$(INCDIR)/FundamentalConstants.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/MediumDiamond.o: \
+	$(SRCDIR)/MediumDiamond.cc $(INCDIR)/MediumDiamond.hh \
+	$(SRCDIR)/Medium.cc $(INCDIR)/Medium.hh \
+	$(INCDIR)/FundamentalConstants.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/MediumSilicon.o: \
+	$(SRCDIR)/MediumSilicon.cc $(INCDIR)/MediumSilicon.hh \
 	$(SRCDIR)/Medium.cc $(INCDIR)/Medium.hh \
 	$(INCDIR)/FundamentalConstants.hh
 	@echo $@
@@ -322,7 +403,35 @@ $(OBJDIR)/SolidSphere.o: \
 	$(SRCDIR)/SolidSphere.cc $(INCDIR)/SolidSphere.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/SolidWire.o: \
+	$(SRCDIR)/SolidWire.cc $(INCDIR)/SolidWire.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/SolidRidge.o: \
+	$(SRCDIR)/SolidRidge.cc $(INCDIR)/SolidRidge.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/SolidHole.o: \
+	$(SRCDIR)/SolidHole.cc $(INCDIR)/SolidHole.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/SolidExtrusion.o: \
+	$(SRCDIR)/SolidExtrusion.cc $(INCDIR)/SolidExtrusion.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/Solid.o: \
+	$(SRCDIR)/Solid.cc $(INCDIR)/Solid.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+$(OBJDIR)/Shaper.o: \
+	$(SRCDIR)/Shaper.cc $(INCDIR)/Shaper.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
 
+
+$(OBJDIR)/Random.o: \
+	$(SRCDIR)/Random.cc $(INCDIR)/Random.hh
+	$(CXX) $(CFLAGS) $< -o $@
 $(OBJDIR)/RandomEngineGSL.o: \
 	$(SRCDIR)/RandomEngineGSL.cc $(INCDIR)/RandomEngineGSL.hh
 	$(CXX) $(CFLAGS) $< -o $@
@@ -334,7 +443,12 @@ $(OBJDIR)/RandomEngineRoot.o: \
 $(OBJDIR)/PlottingEngineRoot.o: \
 	$(SRCDIR)/PlottingEngineRoot.cc $(INCDIR)/PlottingEngineRoot.hh
 	@echo $@
-	@$(CXX) $(CFLAGS) $< -o $@        
+	@$(CXX) $(CFLAGS) $< -o $@    
+  
+$(OBJDIR)/PlottingEngine.o: \
+	$(SRCDIR)/PlottingEngine.cc $(INCDIR)/PlottingEngine.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@      
 
 $(OBJDIR)/Numerics.o: \
 	$(SRCDIR)/Numerics.cc $(INCDIR)/Numerics.hh
@@ -343,12 +457,32 @@ $(OBJDIR)/Numerics.o: \
 
 $(OBJDIR)/Sensor.o: \
 	$(SRCDIR)/Sensor.cc $(INCDIR)/Sensor.hh \
-	$(INCDIR)/ComponentBase.hh $(INCDIR)/FundamentalConstants.hh
+	$(INCDIR)/FundamentalConstants.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+
+$(OBJDIR)/Polygon.o: \
+	$(SRCDIR)/Polygon.cc $(INCDIR)/Polygon.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+
+$(OBJDIR)/QuadTree.o: \
+	$(SRCDIR)/QuadTree.cc $(INCDIR)/QuadTree.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 
 $(OBJDIR)/TetrahedralTree.o: \
 	$(SRCDIR)/TetrahedralTree.cc $(INCDIR)/TetrahedralTree.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+ 
+$(OBJDIR)/KDTree.o: \
+	$(SRCDIR)/KDTree.cc $(INCDIR)/KDTree.hh
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
+ 
+$(OBJDIR)/TGeoTet.o: \
+	$(SRCDIR)/TGeoTet.cc $(INCDIR)/TGeoTet.hh
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 

@@ -1,10 +1,11 @@
 #include <cmath>
 #include "wcpplib/clhep_units/WPhysicalConstants.h"
 #include "wcpplib/math/lorgamma.h"
-#include "wcpplib/stream/prstream.h"
 #include "wcpplib/util/FunNameStack.h"
 
 namespace Heed {
+
+using CLHEP::c_squared;
 
 double lorgamma_1(double beta) {
   if (beta == 0.0) return 0.0;
@@ -31,9 +32,6 @@ double lorbeta2(const double gamma_1) {
 double lorbeta(const double momentum, const double mass) {
   double x = (mass * mass * c_squared) / (momentum * momentum);
   x = x + 1.0;
-  x = 1.0 / x;
-  x = sqrt(x);
-  return x;
+  return sqrt(1. / x);
 }
-
 }

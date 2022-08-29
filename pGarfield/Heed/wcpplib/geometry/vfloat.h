@@ -10,40 +10,18 @@
  */
 #endif
 #include <cmath>
-#include "wcpplib/util/inlinec.h"
-#define max_vfloat DBL_MAX  //1.0E+100           // ??
-typedef double vfloat;
-const vfloat max_safe_vfloat = 0.5 * sqrt(DBL_MAX);  //e+307
-const vfloat vprecision = 1.0E-12;
-
-inline vfloat abslt(vfloat f) { return f > 0.0 ? f : -f; }
-
-inline int apeq(vfloat f1, vfloat f2, vfloat prec = vprecision) {
-  if (abslt(f1 - f2) <= prec)
-    return 1;
-  else
-    return 0;
-}
-inline int not_apeq(vfloat f1, vfloat f2, vfloat prec = vprecision) {
-  if (abslt(f1 - f2) <= prec)
-    return 0;
-  else
-    return 1;
-}
 
 namespace Heed {
-inline int apeq(vfloat f1, vfloat f2, vfloat prec = vprecision) {
-  if (abslt(f1 - f2) <= prec)
-    return 1;
-  else
-    return 0;
+
+typedef double vfloat;
+const vfloat vprecision = 1.0E-12;
+static const vfloat max_vfloat = DBL_MAX;
+
+inline bool apeq(const vfloat f1, const vfloat f2, 
+                 const vfloat prec = vprecision) {
+  return (fabs(f1 - f2) <= prec);
 }
-inline int not_apeq(vfloat f1, vfloat f2, vfloat prec = vprecision) {
-  if (abslt(f1 - f2) <= prec)
-    return 0;
-  else
-    return 1;
-}
+
 }
 
 #endif

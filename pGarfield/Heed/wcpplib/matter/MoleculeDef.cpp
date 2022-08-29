@@ -4,23 +4,30 @@
 #include "wcpplib/clhep_units/WPhysicalConstants.h"
 #include "wcpplib/math/cubic.h"
 
-/*
-1998-2004 I. Smirnov
-*/
+// 1998-2004 I. Smirnov
 
 namespace Heed {
 
-VanDerVaals::VanDerVaals(double fPk, double fTk) : Pkh(fPk), Tkh(fTk) {
-  double R = k_Boltzmann * Avogadro;  // more precise
+using CLHEP::k_Boltzmann;
+using CLHEP::Avogadro;
+using CLHEP::cm3;
+using CLHEP::gram;
+using CLHEP::mole;
+using CLHEP::bar;
+using CLHEP::hep_pascal;
+using CLHEP::kelvin;
+
+VanDerWaals::VanDerWaals(double fPk, double fTk) : Pkh(fPk), Tkh(fTk) {
+  // Rydberg constant
+  const double R = k_Boltzmann * Avogadro;
 
   Vkh = R * 3.0 / 8.0 * Tkh / Pkh;
   ah = 3 * Pkh * Vkh * Vkh;
   bh = 1.0 / 3.0 * Vkh;
-
 }
 
-double VanDerVaals::volume_of_mole(double T, double p, int& s_not_single) {
-  mfunname("VanDerVaals::volume_of_mole(...)");
+double VanDerWaals::volume_of_mole(double T, double p, int& s_not_single) {
+  mfunname("VanDerWaals::volume_of_mole(...)");
 
   double Tr = T / Tkh;
   double Pr = p / Pkh;
@@ -29,257 +36,108 @@ double VanDerVaals::volume_of_mole(double T, double p, int& s_not_single) {
   double r[3];
   int q = cb.find_real_zero(r);
   check_econd11(q, <= 0, mcerr);
-  //check_econd11a(q , == 0 , "uncertainty: at horizontal plato\n", mcerr);
   double x = r[q - 1];   // this is the relative volume taken by one mole
   double res = x * Vkh;  // this is the absolute volume taken by one mole
   Iprint2n(mcout, x, res);
-  if (q == 2) {
-    s_not_single = 1;
-  } else {
-    s_not_single = 0;
-  }
+  s_not_single = q == 2 ? 1 : 0;
   return res;
 }
 
-macro_copy_body(VanDerVaals)
+VanDerWaals* VanDerWaals::copy() const { return new VanDerWaals(*this); }
 
-std::ostream& operator<<(std::ostream& file, const VanDerVaals& f) {
+std::ostream& operator<<(std::ostream& file, const VanDerWaals& f) {
   mfunname(
-      "std::ostream& operator << (std::ostream& file, const VanDerVaals& f)");
-  Ifile << "VanDerVaals:\n";
+      "std::ostream& operator << (std::ostream& file, const VanDerWaals& f)");
+  Ifile << "VanDerWaals:\n";
   indn.n += 2;
-  Iprintn(file, f.Pk() / (atmosphere));
-  Iprintn(file, f.Tk() / (kelvin));
+  Iprintn(file, f.Pk() / (CLHEP::atmosphere));
+  Iprintn(file, f.Tk() / (CLHEP::kelvin));
   Iprintn(file, f.Vk() / (cm3));
   Ifile << "For comparison, the volume of a mole of ideal gas\n";
   Ifile << "at the same conditions takes\n";
   Iprintn(file, (k_Boltzmann * Avogadro * f.Tk() / f.Pk()) / (cm3 * mole));
-  Iprintn(file, f.a() / (atmosphere * cm3 * cm3));
+  Iprintn(file, f.a() / (CLHEP::atmosphere * cm3 * cm3));
   Iprintn(file, f.b() / (cm3));
   indn.n -= 2;
   return file;
 }
 
-/*
-//This is not finished
-
-double VanDerVaals::pressure(double M, // the number of moles
-                             double volume,
-                             double T)
-{
-  mfunname("double VanDerVaals::pressure(double M, double volume, double T)");
-
-  double ridberg1=8.314 * (joule/(kelvin*mole));  // for debug
-  double ridberg2 = k_Boltzmann * Avogadro;  // more precise
-  mcout<<"ridberg1/(joule/(kelvin*mole)) ="
-       << ridberg1/(joule/(kelvin*mole))<<'\n';
-  mcout<<"ridberg2/(joule/(kelvin*mole)) ="
-       << ridberg2/(joule/(kelvin*mole))<<'\n';
-
-  double pa = M * (
-
-  Parabol par(
-*/
-
-MoleculeDef::MoleculeDef(void) : nameh("none"), notationh("none") {
-  MoleculeDef::get_logbook().append(this);
-}
-/*
-MoleculeDef::MoleculeDef(const MoleculeDef& f)
-{
-  mfunnamep("MoleculeDef::MoleculeDef(const MoleculeDef& f)");
-  funnw.ehdr(cerr);
-  mcerr<<"The copy constructor is not allowed, "
-       <<"since it would create second molecula with the same name and
-notation\n";
-  spexit(mcerr);
-}
-
-MoleculeDef& MoleculeDef::operator=(const MoleculeDef& f)
-{
-  mfunnamep("MoleculeDef& MoleculeDef::operator=(const MoleculeDef& f)");
-  funnw.ehdr(cerr);
-  mcerr<<"The assignment operator is not allowed, "
-       <<"since it would create second molecula with the same name and
-notation\n";
-  spexit(mcerr);
-}
-*/
-MoleculeDef::MoleculeDef(const String& fname, const String& fnotation,
-                         long fqatom, const DynLinArr<String>& fatom_not,
-                         const DynLinArr<long>& fqatom_ps,
-                         ActivePtr<VanDerVaals> fawls)
+MoleculeDef::MoleculeDef(const std::string& fname, const std::string& fnotation,
+                         long fqatom, const std::vector<std::string>& fatom_not,
+                         const std::vector<long>& fqatom_ps,
+                         std::shared_ptr<VanDerWaals> fvdw)
     : AtomMixDef(fqatom, fatom_not, fqatom_ps),
       nameh(fname),
       notationh(fnotation),
-      qatom_psh(fqatom_ps),
-      Z_totalh(0),
-      A_totalh(0.0),
-      tqatomh(0),
-      awlsh(fawls) {
+      qatom_psh(fqatom_ps) {
   mfunname("MoleculeDef::MoleculeDef(...)");
-  long n;
-  for (n = 0; n < qatom(); n++) {
+  m_vdw = std::move(fvdw);
+  for (long n = 0; n < qatom(); n++) {
     Z_totalh += qatom_psh[n] * atom(n)->Z();
     A_totalh += qatom_psh[n] * atom(n)->A();
     tqatomh += qatom_psh[n];
     check_econd11(qatom_psh[n], <= 0, mcerr);
   }
-  check_econd11(s, <= 0, mcerr);
-  verify();
-  MoleculeDef::get_logbook().append(this);
 }
 
 // one atom in molecule
-MoleculeDef::MoleculeDef(const String& fname, const String& fnotation,
-                         const String& fatom_not, long fqatom_ps,
-                         ActivePtr<VanDerVaals> fawls)
-    : AtomMixDef(fatom_not),
-      nameh(fname),
-      notationh(fnotation),
-      qatom_psh(1, fqatom_ps),
-      Z_totalh(0),
-      A_totalh(0.0),
-      tqatomh(fqatom_ps),
-      awlsh(fawls) {
-  mfunname("MoleculeDef::MoleculeDef(...)");
-  Z_totalh = atom(0)->Z() * fqatom_ps;
-  A_totalh = atom(0)->A() * fqatom_ps;
-  verify();
-  MoleculeDef::get_logbook().append(this);
+MoleculeDef::MoleculeDef(const std::string& fname, const std::string& fnotation,
+                         const std::string& fatom_not, long fqatom_ps,
+                         std::shared_ptr<VanDerWaals> fvdw) :
+    MoleculeDef(fname, fnotation, 1, {fatom_not}, {fqatom_ps}, fvdw) { 
 }
 
 // two atoms
-MoleculeDef::MoleculeDef(const String& fname, const String& fnotation,
-                         const String& fatom_not1, long fqatom_ps1,
-                         const String& fatom_not2, long fqatom_ps2,
-                         ActivePtr<VanDerVaals> fawls)
-    : AtomMixDef(fatom_not1, fqatom_ps1, fatom_not2, fqatom_ps2),
-      nameh(fname),
-      notationh(fnotation),
-      qatom_psh(2),
-      Z_totalh(0),
-      A_totalh(0.0),
-      tqatomh(0),
-      awlsh(fawls) {
-  mfunname("MoleculeDef::MoleculeDef(...)");
-  qatom_psh[0] = fqatom_ps1;
-  qatom_psh[1] = fqatom_ps2;
-  long n;
-  for (n = 0; n < qatom(); n++) {
-    check_econd11(qatom_psh[n], <= 0, mcerr);
-    Z_totalh += qatom_psh[n] * atom(n)->Z();
-    A_totalh += qatom_psh[n] * atom(n)->A();
-    tqatomh += qatom_psh[n];
-  }
-  verify();
-  MoleculeDef::get_logbook().append(this);
+MoleculeDef::MoleculeDef(const std::string& fname, const std::string& fnotation,
+                         const std::string& fatom_not1, long fqatom_ps1,
+                         const std::string& fatom_not2, long fqatom_ps2,
+                         std::shared_ptr<VanDerWaals> fvdw) : 
+    MoleculeDef(fname, fnotation, 2, {fatom_not1, fatom_not2}, 
+                {fqatom_ps1, fqatom_ps2}, fvdw) {
+
 }
 
 // three atoms
-MoleculeDef::MoleculeDef(const String& fname, const String& fnotation,
-                         const String& fatom_not1, long fqatom_ps1,
-                         const String& fatom_not2, long fqatom_ps2,
-                         const String& fatom_not3, long fqatom_ps3,
-                         ActivePtr<VanDerVaals> fawls)
-    : AtomMixDef(fatom_not1, fqatom_ps1, fatom_not2, fqatom_ps2, fatom_not3,
-                 fqatom_ps3),
-      nameh(fname),
-      notationh(fnotation),
-      qatom_psh(3),
-      Z_totalh(0),
-      A_totalh(0.0),
-      tqatomh(0),
-      awlsh(fawls) {
-  mfunname("MoleculeDef::MoleculeDef(...)");
-  qatom_psh[0] = fqatom_ps1;
-  qatom_psh[1] = fqatom_ps2;
-  qatom_psh[2] = fqatom_ps3;
-  long n;
-  for (n = 0; n < qatom(); n++) {
-    check_econd11(qatom_psh[n], <= 0, mcerr);
-    Z_totalh += qatom_psh[n] * atom(n)->Z();
-    A_totalh += qatom_psh[n] * atom(n)->A();
-    tqatomh += qatom_psh[n];
-  }
-  verify();
-  MoleculeDef::get_logbook().append(this);
+MoleculeDef::MoleculeDef(const std::string& fname, const std::string& fnotation,
+                         const std::string& fatom_not1, long fqatom_ps1,
+                         const std::string& fatom_not2, long fqatom_ps2,
+                         const std::string& fatom_not3, long fqatom_ps3,
+                         std::shared_ptr<VanDerWaals> fvdw) :
+    MoleculeDef(fname, fnotation, 3, {fatom_not1, fatom_not2, fatom_not3}, 
+                {fqatom_ps1, fqatom_ps2, fqatom_ps3}, fvdw) {
+
 }
 
 void MoleculeDef::print(std::ostream& file, int l) const {
   if (l > 0) file << (*this);
 }
 
-void MoleculeDef::printall(std::ostream& file) {
-  Ifile << "MoleculeDef::printall:\n";
-  AbsListNode<MoleculeDef*>* an = NULL;
-  AbsList<MoleculeDef*>& logbook = MoleculeDef::get_logbook();
-  while ((an = logbook.get_next_node(an)) != NULL) {
-    file << (*(an->el));
-  }
-}
-
-void MoleculeDef::verify(void) {
-  mfunnamep("void MoleculeDef::verify(void)");
-  if (nameh == "none" && notationh == "none") return;
-  AbsListNode<MoleculeDef*>* an = NULL;
-  while ((an = MoleculeDef::get_logbook().get_next_node(an)) != NULL) {
-    if (an->el->nameh == nameh || an->el->notationh == notationh) {
-      funnw.ehdr(mcerr);
-      mcerr << "can not initialize two molecules "
-            << "with the same name or notation\n";
-      mcerr << "name=" << nameh << " notation=" << notationh << '\n';
-      spexit(mcerr);
-    }
-  }
-}
-
-AbsList<MoleculeDef*>& MoleculeDef::get_logbook(void) {
-  static AbsList<MoleculeDef*> logbook;
-  return logbook;
-}
-
-const AbsList<MoleculeDef*>& MoleculeDef::get_const_logbook(void) {
-  return MoleculeDef::get_logbook();
-}
-
-MoleculeDef* MoleculeDef::get_MoleculeDef(const String& fnotation) {
-  AbsList<MoleculeDef*>& logbook = MoleculeDef::get_logbook();
-  AbsListNode<MoleculeDef*>* an = NULL;
-  while ((an = logbook.get_next_node(an)) != NULL) {
-    if (an->el->notation() == fnotation) return an->el;
-  }
-  return NULL;
-}
-
 std::ostream& operator<<(std::ostream& file, const MoleculeDef& f) {
-  mfunnamep(
-      "std::ostream& operator << (std::ostream& file, const MoleculeDef& f)");
+  mfunnamep("std::ostream& operator << (std::ostream&, const MoleculeDef&)");
+  constexpr double gpm = gram / mole;
   Ifile << "MoleculeDef: name=" << std::setw(10) << f.name()
         << " notation=" << std::setw(3) << f.notation() << '\n';
   indn.n += 2;
   Ifile << "Z_total()=" << std::setw(3) << f.Z_total()
-        << " A_total()/(gram/mole)=" << f.A_total() / (gram / mole)
+        << " A_total()/(gram/mole)=" << f.A_total() / gpm 
         << " tqatom()=" << f.tqatom() << '\n';
   Iprintn(file, f.qatom());
   indn.n += 2;
-  long n;
-  for (n = 0; n < f.qatom(); n++) {
+  for (long n = 0; n < f.qatom(); n++) {
     Ifile << "n=" << n << " atom(n)->notation=" << f.atom(n)->notation()
           << " qatom_ps(n)=" << f.qatom_ps(n) << '\n';
   }
   indn.n -= 2;
   f.AtomMixDef::print(file, 1);
-  Iprintn(mcout, f.awls());
-  VanDerVaals* at = f.awls().get();
-  if (at != NULL) {
-    Ifile << "Density at the crutial conditions for ideal gas (for debug):\n";
-    double ridberg = k_Boltzmann * Avogadro;  // more precise
-    //mcout<<"ridberg/(joule/(kelvin*mole)) ="
-    //     << ridberg/(joule/(kelvin*mole))<<'\n';
-    //double sa = f.A_total();
+  VanDerWaals* at = f.vdw().get();
+  if (at) {
+    Ifile << "Density at the crucial conditions for ideal gas (for debug):\n";
+    double rydberg = k_Boltzmann * Avogadro;  // more precise
+    // mcout<<"rydberg/(joule/(kelvin*mole)) ="
+    //     << rydberg/(joule/(kelvin*mole))<<'\n';
+    // double sa = f.A_total();
     Iprintn(mcout,
-            f.A_total() * at->Pk() / (ridberg * at->Tk()) / (gram / cm3));
+            f.A_total() * at->Pk() / (rydberg * at->Tk()) / (gram / cm3));
     Ifile << "For the Waals:\n";
     Iprintn(mcout, f.A_total() / at->Vk() / (gram / cm3));
   }
@@ -287,6 +145,87 @@ std::ostream& operator<<(std::ostream& file, const MoleculeDef& f) {
   return file;
 }
 
-MoleculeDef::~MoleculeDef() { MoleculeDef::get_logbook().remove(this); }
+std::list<MoleculeDef> MoleculeDefs::molecules;
+
+void MoleculeDefs::printMolecules(std::ostream& file) {
+  Ifile << "MoleculeDefs::printMolecules:\n";
+  for (const auto& molecule : getMolecules()) {
+    file << molecule;
+  }
+}
+
+const MoleculeDef* MoleculeDefs::getMolecule(const std::string& fnotation) {
+  for (const auto& molecule : getMolecules()) {
+    if (molecule.notation() == fnotation) return &molecule;
+  }
+  return nullptr;
+}
+
+const std::list<MoleculeDef>& MoleculeDefs::getMolecules() {
+  if (!molecules.empty()) return molecules;
+  molecules.emplace_back(MoleculeDef("Hydrogen", "H2", "H", 2));
+  molecules.emplace_back(MoleculeDef("Helium", "He", "He", 1));
+  molecules.emplace_back(MoleculeDef("Nitrogen", "N2", "N", 2));
+  molecules.emplace_back(MoleculeDef("Oxygen", "O2", "O", 2));
+  molecules.emplace_back(MoleculeDef("Neon", "Ne", "Ne", 1));
+  // molecules.emplace_back(MoleculeDef("Argon_without_K", "Ar_without_K",
+  //                                    "Ar_without_K", 1));
+  molecules.emplace_back(MoleculeDef("Argon", "Ar", "Ar", 1,
+      std::make_shared<VanDerWaals>(48.6 * bar, 150.7 * kelvin)));
+  molecules.emplace_back(MoleculeDef("Krypton", "Kr", "Kr", 1,
+      std::make_shared<VanDerWaals>(55.0 * bar, 209.4 * kelvin)));
+  molecules.emplace_back(MoleculeDef("Xenon", "Xe", "Xe", 1,
+      std::make_shared<VanDerWaals>(55.0 * bar, 209.4 * kelvin)));
+
+  molecules.emplace_back(MoleculeDef("NH3", "NH3", "N", 1, "H", 3));
+  molecules.emplace_back(MoleculeDef("N2O", "N2O", "N", 2, "O", 1));
+  molecules.emplace_back(MoleculeDef("CO2", "CO2", "C", 1, "O", 2));
+  molecules.emplace_back(MoleculeDef("CH4", "CH4", "C", 1, "H", 4,
+      std::make_shared<VanDerWaals>(4.64e6 * hep_pascal, 
+                                    (273.15 - 82.5) * kelvin)));
+  molecules.emplace_back(MoleculeDef("CF4", "CF4", "C", 1, "F", 4,
+      std::make_shared<VanDerWaals>(42.5 * bar, 369.8 * kelvin)));
+  molecules.emplace_back(MoleculeDef("SF4", "SF4", "S", 1, "F", 4));
+  molecules.emplace_back(MoleculeDef("SF6", "SF6", "S", 1, "F", 6));
+  molecules.emplace_back(MoleculeDef("C2H2", "C2H2", "C", 2, "H", 2));
+  molecules.emplace_back(MoleculeDef("C2H4", "C2H4", "C", 2, "H", 4));
+  molecules.emplace_back(MoleculeDef("C2H6", "C2H6", "C", 2, "H", 6));
+  molecules.emplace_back(MoleculeDef("C3H8", "C3H8", "C", 3, "H", 8,
+      std::make_shared<VanDerWaals>(42.5 * bar, 369.8 * kelvin)));
+  molecules.emplace_back(MoleculeDef("C4H10", "C4H10", "C", 4, "H", 10,
+      std::make_shared<VanDerWaals>(40.0 * bar, 418.3 * kelvin)));
+  molecules.emplace_back(MoleculeDef("C2H2F4", "C2H2F4", "C", 2, "F", 4, "H", 2));
+  molecules.emplace_back(MoleculeDef("H2O", "H2O", "H", 2, "O", 1,
+      std::make_shared<VanDerWaals>(22.9e6 * hep_pascal, (273.15 + 374.15) * kelvin)));
+  molecules.emplace_back(MoleculeDef("Methylal", "Methylal", "O", 2, "C", 3, "H", 8,
+      std::make_shared<VanDerWaals>(39.5 * bar, 480.6 * kelvin)));
+
+  // Additional molecule definitions for compatibility with Magboltz
+  molecules.emplace_back(MoleculeDef("C5H12", "C5H12", "C", 5, "H", 12));
+  molecules.emplace_back(MoleculeDef("NO", "NO", "N", 1, "O", 1));
+  molecules.emplace_back(MoleculeDef("CO", "CO", "C", 1, "O", 1));
+  molecules.emplace_back(MoleculeDef("DME", "DME", "C", 2, "H", 6, "O", 1));
+  molecules.emplace_back(MoleculeDef("C2F6", "C2F6", "C", 2, "F", 6));
+  molecules.emplace_back(MoleculeDef("C3H6", "C3H6", "C", 3, "H", 6));
+  molecules.emplace_back(MoleculeDef("CH3OH", "CH3OH", "C", 1, "H", 4, "O", 1));
+  molecules.emplace_back(MoleculeDef("C2H5OH", "C2H5OH", "C", 2, "H", 6, "O", 1));
+  molecules.emplace_back(MoleculeDef("C3H7OH", "C3H7OH", "C", 3, "H", 8, "O", 1));
+  molecules.emplace_back(MoleculeDef("Cs", "Cs", "Cs", 1));
+  molecules.emplace_back(MoleculeDef("F2", "F2", "F", 2));
+  molecules.emplace_back(MoleculeDef("CS2", "CS2", "C", 1, "S", 2));
+  molecules.emplace_back(MoleculeDef("COS", "COS", "C", 1, "O", 1, "S", 1));
+  molecules.emplace_back(MoleculeDef("BF3", "BF3", "B", 1, "F", 3));
+  molecules.emplace_back(MoleculeDef("C2HF5", "C2HF5", "C", 2, "H", 1, "F", 5));
+  molecules.emplace_back(MoleculeDef("CHF3", "CHF3", "C", 1, "H", 1, "F", 3));
+  molecules.emplace_back(MoleculeDef("CF3Br", "CF3Br", "C", 1, "F", 3, "Br", 1));
+  molecules.emplace_back(MoleculeDef("C3F8", "C3F8", "C", 3, "F", 8));
+  molecules.emplace_back(MoleculeDef("O3", "O3", "O", 3));
+  molecules.emplace_back(MoleculeDef("Hg", "Hg", "Hg", 1));
+  molecules.emplace_back(MoleculeDef("H2S", "H2S", "H", 2, "S", 1));
+  molecules.emplace_back(MoleculeDef("GeH4", "GeH4", "Ge", 1, "H", 4));
+  molecules.emplace_back(MoleculeDef("SiH4", "SiH4", "Si", 1, "H", 4));
+  molecules.emplace_back(MoleculeDef("CCl4", "CCl4", "C", 1, "Cl", 4));
+  return molecules;
+}
 
 }

@@ -1,58 +1,42 @@
 #ifndef HEEDCONDELECTRON
 #define HEEDCONDELECTRON
 
-#include "heed++/code/HeedDeltaElectron.h"
-#include "wcpplib/safetl/BlkArr.h"
-
-/*
-Conduction electrons deposited in gas.
-Usually these are electron-ion pairs created by the delta-electron.
-But the delta-electron is itself converted in conduction electron
-at the end of its route. In this case the ion may be located somewhere else.
-To reduce the computer espenses, the position of conduction electron
-is determined only in the local coordinate system, that is in the
-most deep volume.
-
-To make the coduction electrons generated, the volume
-must be derived from class SensitiveVolume.
-
-2003, I. Smirnov
-
-*/
+#include <vector>
+#include "wcpplib/geometry/vec.h"
 
 namespace Heed {
 
+/// Conduction electrons deposited in the sensitive medium.
+/// Usually these are electron-ion pairs created by the delta-electron.
+/// In addition, the delta-electron is itself converted to a conduction electron
+/// at the end of its path. In this case the ion may be located somewhere else.
+/// To reduce the computer expenses, the position of a conduction electron
+/// is determined only in the local coordinate system ("deepest" volume).
+///
+/// 2003, I. Smirnov
+
 class HeedCondElectron {
  public:
-  // position (in the first system from tid system)
-  // point pt;
-  // position (in the local system, the last system from tid)
-  point ptloc;
-  // time
-  double time;
-  // manip_absvol_treeid tid;
-  // reference to parent
-  // PassivePtr< HeedDeltaElectron > parent_de;
-  // constructors
-  HeedCondElectron() {}
-  HeedCondElectron(point fptloc, double ftime) : ptloc(fptloc), time(ftime) {}
-  //HeedCondElectron(point fpt, point fptloc, manip_absvol_treeid ftid,
-  //                 PassivePtr< HeedDeltaElectron > fparent_de):
-  // pt(fpt), ptloc(fptloc), tid(ftid), parent_de(fparent_de) {;}
-  // destructor
-  virtual ~HeedCondElectron() {}
-  virtual void print(std::ostream& file, int l) const;
+  /// X coordinate (in the local system).
+  double x = 0.;
+  /// Y coordinate (in the local system).
+  double y = 0.;
+  /// Z coordinate (in the local system).
+  double z = 0.;
+  /// Time.
+  double time = 0.;
+  
+  /// Default constructor
+  HeedCondElectron() = default;
+  /// Constructor
+  HeedCondElectron(const point& fpt, const double ftime)
+      : x(fpt.v.x), y(fpt.v.y), z(fpt.v.z), time(ftime) {}
+  /// Constructor
+  HeedCondElectron(const double fx, const double fy, const double fz,
+                   const double ftime) 
+      : x(fx), y(fy), z(fz), time(ftime) {}
+  void print(std::ostream& file, int l) const;
 };
-
-//extern AbsList< HeedCondElectron > conduction_electron_bank;
-//extern BlkArr< HeedCondElectron > conduction_electron_bank;
-
-class SensitiveVolume {
- public:
-  BlkArr<HeedCondElectron> conduction_electron_bank;
-  SensitiveVolume() {}
-};
-
 }
 
 #endif

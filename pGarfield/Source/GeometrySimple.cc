@@ -1,185 +1,149 @@
+#include <algorithm>
 #include <iostream>
-#include "GeometrySimple.hh"
+
+#include "Garfield/GeometrySimple.hh"
 
 namespace Garfield {
 
-GeometrySimple::GeometrySimple()
-    : m_nMedia(0), m_nSolids(0), 
-      m_hasBoundingBox(false), m_debug(false) {
+GeometrySimple::GeometrySimple() : Geometry("GeometrySimple") {}
 
-  m_className = "GeometrySimple";
-
-  m_media.clear();
-  m_solids.clear();
-}
-
-void GeometrySimple::AddSolid(Solid* s, Medium* m) {
-
+void GeometrySimple::AddSolid(Solid* solid, Medium* medium) {
   // Make sure the solid and the medium are defined.
-  if (s == NULL) {
-    std::cerr << m_className << "::AddSolid:\n";
-    std::cerr << "    Solid pointer is null.\n";
+  if (!solid || !medium) {
+    std::cerr << m_className << "::AddSolid: Null pointer.\n";
     return;
-  }
-
-  if (m == NULL) {
-    std::cerr << m_className << "::AddSolid:\n";
-    std::cerr << "    Medium pointer is null.\n";
-    return;
-  }
-
-  int n = -1;
-  int id = m->GetId();
-  // Check if this medium is already in the list
-  for (unsigned int i = 0; i < m_nMedia; ++i) {
-    if (id == m_media[i].medium->GetId()) {
-      n = i;
-      break;
-    }
-  }
-  // If the medium does not exist yet, add it to the list
-  if (n < 0) {
-    medium newMedium;
-    newMedium.medium = m;
-    m_media.push_back(newMedium);
-    n = m_nMedia;
-    ++m_nMedia;
   }
 
   // Update the bounding box ranges
   double xmin, ymin, zmin;
   double xmax, ymax, zmax;
-  if (!s->GetBoundingBox(xmin, ymin, zmin, xmax, ymax, zmax)) {
-    std::cerr << m_className << "::AddSolid:\n";
-    std::cerr << "    Solid has no bounding box.\n";
+  if (!solid->GetBoundingBox(xmin, ymin, zmin, xmax, ymax, zmax)) {
+    std::cerr << m_className << "::AddSolid: Solid has no bounding box.\n";
     return;
   }
 
   if (m_hasBoundingBox) {
-    if (xmin < m_xMinBoundingBox) m_xMinBoundingBox = xmin;
-    if (ymin < m_yMinBoundingBox) m_yMinBoundingBox = ymin;
-    if (zmin < m_zMinBoundingBox) m_zMinBoundingBox = zmin;
-    if (xmax > m_xMaxBoundingBox) m_xMaxBoundingBox = xmax;
-    if (ymax > m_yMaxBoundingBox) m_yMaxBoundingBox = ymax;
-    if (zmax > m_zMaxBoundingBox) m_zMaxBoundingBox = zmax;
+    m_bbMin[0] = std::min(m_bbMin[0], xmin);
+    m_bbMin[1] = std::min(m_bbMin[1], ymin);
+    m_bbMin[2] = std::min(m_bbMin[2], zmin);
+    m_bbMax[0] = std::max(m_bbMax[0], xmax);
+    m_bbMax[1] = std::max(m_bbMax[1], ymax);
+    m_bbMax[2] = std::max(m_bbMax[2], zmax);
   } else {
-    m_xMinBoundingBox = xmin;
-    m_yMinBoundingBox = ymin;
-    m_zMinBoundingBox = zmin;
-    m_xMaxBoundingBox = xmax;
-    m_yMaxBoundingBox = ymax;
-    m_zMaxBoundingBox = zmax;
+    m_bbMin[0] = xmin;
+    m_bbMin[1] = ymin;
+    m_bbMin[2] = zmin;
+    m_bbMax[0] = xmax;
+    m_bbMax[1] = ymax;
+    m_bbMax[2] = zmax;
     m_hasBoundingBox = true;
   }
 
-  // Add the new solid to the list
-  solid newSolid;
-  newSolid.solid = s;
-  newSolid.medium = n;
-  m_solids.push_back(newSolid);
-  ++m_nSolids;
+  // Add the new solid to the list.
+  m_solids.emplace_back(std::make_pair(solid, medium));
 }
 
-Solid* GeometrySimple::GetSolid(const double& x, const double& y, 
-                                const double& z) const {
+Solid* GeometrySimple::GetSolid(const double x, const double y,
+                                const double z, const bool tesselated) const {
+  for (const auto& solid : m_solids) {
+    if (solid.first->IsInside(x, y, z, tesselated)) return solid.first;
+  }
+  return nullptr;
+}
 
-  for (unsigned int i = 0; i < m_nSolids; ++i) {
-    if (m_solids[i].solid->IsInside(x, y, z)) {
-      return m_solids[i].solid;
+Medium* GeometrySimple::GetMedium(
+    const double x, const double y, const double z, 
+    const bool tesselated) const {
+  for (const auto& solid : m_solids) {
+    if (solid.first->IsInside(x, y, z, tesselated)) {
+      return solid.second;
     }
   }
-  return NULL;
+  return m_medium;
 }
 
-Medium* GeometrySimple::GetMedium(const double& x, const double& y, const double& z) const {
-
-  for (unsigned int i = 0; i < m_nSolids; ++i) {
-    if (m_solids[i].solid->IsInside(x, y, z)) {
-      if (m_solids[i].medium < 0) return NULL;
-      return m_media[m_solids[i].medium].medium;
-    }
+Solid* GeometrySimple::GetSolid(const size_t i) const {
+  if (i >= m_solids.size()) {
+    std::cerr << m_className << "::GetSolid: Index out of range.\n";
+    return nullptr;
   }
-  return NULL;
+  return m_solids[i].first;
 }
 
-Solid* GeometrySimple::GetSolid(const unsigned int& i) const {
-
-  if (i >= m_nSolids) {
-    std::cerr << m_className << "::GetSolid:\n";
-    std::cerr << "    Requested solid " << i << " does not exist.\n";
-    return NULL;
+Solid* GeometrySimple::GetSolid(const size_t i, Medium*& medium) const {
+  if (i >= m_solids.size()) {
+    std::cerr << m_className << "::GetSolid: Index out of range.\n";
+    return nullptr;
   }
-
-  return m_solids[i].solid;
-}
-
-Medium* GeometrySimple::GetMedium(const unsigned int& i) const {
-
-  if (i >= m_nMedia) {
-    std::cerr << m_className << "::GetMedium:\n";
-    std::cerr << "    Requested medium " << i << " does not exist.\n";
-    return NULL;
-  }
-
-  return m_media[i].medium;
+  medium = m_solids[i].second;
+  return m_solids[i].first;
 }
 
 void GeometrySimple::Clear() {
-
-  m_media.clear();
   m_solids.clear();
-  m_nMedia = 0;
-  m_nSolids = 0;
+  m_medium = nullptr;
 }
 
 void GeometrySimple::PrintSolids() {
-
   std::cout << m_className << "::PrintSolids:\n";
-  if (m_nSolids == 1) {
+  const auto nSolids = m_solids.size();
+  if (nSolids == 1) {
     std::cout << "    1 solid\n";
   } else {
-    std::cout << "    " << m_nSolids << " solids\n";
+    std::cout << "    " << nSolids << " solids\n";
   }
-  if (m_nSolids == 0) return;
+  if (m_solids.empty()) return;
   std::cout << "      Index      Type    Medium\n";
-  for (unsigned int i = 0; i < m_nSolids; ++i) {
+  for (size_t i = 0; i < nSolids; ++i) {
     std::cout << "        " << i << "         ";
-    if (m_solids[i].solid->IsBox()) {
-      std::cout << "box      ";
-    } else if (m_solids[i].solid->IsTube()) {
-      std::cout << "tube     ";
+    if (m_solids[i].first->IsBox()) {
+      std::cout << "box       ";
+    } else if (m_solids[i].first->IsTube()) {
+      std::cout << "tube      ";
+    } else if (m_solids[i].first->IsSphere()) {
+      std::cout << "sphere    ";
+    } else if (m_solids[i].first->IsHole()) {
+      std::cout << "hole      ";
+    } else if (m_solids[i].first->IsRidge()) {
+      std::cout << "ridge     ";
+    } else if (m_solids[i].first->IsExtrusion()) {
+      std::cout << "extrusion ";
+    } else if (m_solids[i].first->IsWire()) {
+      std::cout << "wire      ";
     } else {
       std::cout << "unknown  ";
     }
-    std::cout << m_media[m_solids[i].medium].medium->GetName() << "\n";
+    if (m_solids[i].second) {
+      std::cout << m_solids[i].second->GetName() << "\n";
+    } else {
+      std::cout << " ---\n";
+    }
   }
 }
 
-bool GeometrySimple::IsInside(const double& x, const double& y, 
-                              const double& z) const {
-
+bool GeometrySimple::IsInside(const double x, const double y,
+                              const double z, const bool tesselated) const {
   if (!IsInBoundingBox(x, y, z)) return false;
 
-  for (unsigned int i = 0; i < m_nSolids; ++i) {
-    if (m_solids[i].solid->IsInside(x, y, z)) return true;
+  for (const auto& solid : m_solids) {
+    if (solid.first->IsInside(x, y, z, tesselated)) return true;
   }
   return false;
 }
 
-bool GeometrySimple::IsInBoundingBox(const double& x, const double& y,
-                                     const double& z) const {
-
+bool GeometrySimple::IsInBoundingBox(const double x, const double y,
+                                     const double z) const {
   if (!m_hasBoundingBox) {
     if (m_debug) {
-      std::cerr << m_className << "::IsInBoundingBox:\n";
-      std::cerr << "    Bounding box is not defined.\n";
+      std::cerr << m_className << "::IsInBoundingBox:\n"
+                << "    Bounding box is not defined.\n";
     }
     return true;
   }
 
-  if (x >= m_xMinBoundingBox && x <= m_xMaxBoundingBox && 
-      y >= m_yMinBoundingBox && y <= m_yMaxBoundingBox && 
-      z >= m_zMinBoundingBox && z <= m_zMaxBoundingBox)
+  if (x >= m_bbMin[0] && x <= m_bbMax[0] &&
+      y >= m_bbMin[1] && y <= m_bbMax[1] &&
+      z >= m_bbMin[2] && z <= m_bbMax[2])
     return true;
   return false;
 }

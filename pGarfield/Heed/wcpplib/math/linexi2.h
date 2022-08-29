@@ -15,6 +15,8 @@ text appear in all copies and in supporting documentation.
 The file is provided "as is" without express or implied warranty.
 */
 
+namespace Heed {
+
 class linexi2_coor {
  public:
   long qlr;
@@ -61,23 +63,9 @@ class linexi2 : public linexi2_coor {
     a = lx.a;
     b = lx.b;
   }
-  double line(double x) {
-    return a * x + b;
-  }  //??
+  double line(const double x) { return a * x + b; }
 };
 std::ostream& operator<<(std::ostream& file, const linexi2& l);
 
-class linexi2B : public linexi2 {
- public:
-  double** B;
-  linexi2B(linexi2& lx);
-  ~linexi2B() { delete B; }
-  void copy(const linexi2B& lxB);
-  linexi2B(const linexi2B& lxB);
-  linexi2B& operator=(const linexi2B& lxB) {
-    copy(lxB);
-    return *this;
-  }
-};
-
+}
 #endif

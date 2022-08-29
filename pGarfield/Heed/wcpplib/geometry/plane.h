@@ -1,9 +1,7 @@
 #ifndef PLANE_H
 #define PLANE_H
-/*
-Plane defined by point and vector.  The vector is normal to plane.
 
-Copyright (c) 2000 Igor B. Smirnov
+/* Copyright (c) 2000 Igor B. Smirnov
 
 The file can be used, copied, modified, and distributed
 according to the terms of GNU Lesser General Public License version 2.1
@@ -19,38 +17,37 @@ The file is provided "as is" without express or implied warranty.
 
 namespace Heed {
 
-// **** plane ****
-
 class polyline;
+
+/// Plane, defined by defined by a point and a vector normal to the plane.
 
 class plane : public absref {
  protected:
-  point piv;  // origin point, pivot
-  vec dir;    // direction of normal, unit vector
+  /// Origin point, pivot.
+  point piv;  
+  /// Direction of normal, unit vector.
+  vec dir;    
+
  public:
-  point Gpiv(void) const {
-    return piv;
-  }
-  vec Gdir(void) const {
-    return dir;
-  }
+  point Gpiv() const { return piv; }
+  vec Gdir() const { return dir; }
 
  protected:
-  virtual void get_components(ActivePtr<absref_transmit>& aref_tran);
-  static absref(absref::* aref[2]);
+  virtual absref_transmit get_components() override;
+  static absref absref::* aref[2];
 
  public:
-
-  plane() : piv(), dir() { ; }
-  plane(const point& fpiv, const vec& fdir) : piv(fpiv), dir(unit_vec(fdir)) {
-    ;
-  }
+  plane() : piv(), dir() {}
+  plane(const point& fpiv, const vec& fdir) : piv(fpiv), dir(unit_vec(fdir)) {}
   plane(const straight& sl, const point& pt);
   plane(const straight& sl1, const straight& sl2, vfloat prec);
-  // good if lines are crossed or if they are different not crossed parallel.
+  // Good if lines are crossed or if they are different not crossed parallel.
   // Otherwise vecerror != 0
   // Prec is used for crossing of lines.
 
+  /// Copy constructor.
+  plane(const plane& p) : piv(p.piv), dir(p.dir) {}
+  /// Copy assignment operator.
   plane& operator=(const plane& fpl) {
     piv = fpl.piv;
     dir = fpl.dir;
@@ -61,24 +58,20 @@ class plane : public absref {
   friend int operator!=(const plane& pl1, const plane& pl2) {
     return pl1 == pl2 ? 0 : 1;
   }
-  friend int apeq(const plane& pl1, const plane& pl2, vfloat prec);
-  friend int not_apeq(const plane& pl1, const plane& pl2, vfloat prec) {
-    return apeq(pl1, pl2, prec) ? 0 : 1;
-  }
+  friend bool apeq(const plane& pl1, const plane& pl2, vfloat prec);
+
+  /// Return 1 if a point is in the plane (within precision prec).
   int check_point_in(const point& fp, vfloat prec) const;
-  // returns 1 if point in the planeCalculates distance
-  // and compares it with prec
 
+  /// Figure out whether a straight line crosses the plane 
+  /// and return the intersection point if it does.
+  /// vecerror = 2: line is parallel to the plane.
+  /// vecerror = 3: line is in the plane.
   point cross(const straight& sl) const;
-  // figure out whether the plane is crossed by straight line
-  // and return point if it is.
-  // straight is parallel(exactly) to plane but is not in plane,
-  //                      different parallel   vecerror=2
-  // the straight line is in plane(exactly)    vecerror=3
-
+  /// Determine the intersection with another plane.
+  /// vecerror = 2: planes are parallel.
+  /// vecerror = 3: planes are identical.
   straight cross(const plane& sl) const;
-  // different parallel     vecerror=2
-  // the same planes        vecerror=3
 
   int cross(const polyline& pll, point* crpt, int& qcrpt, polyline* crpll,
             int& qcrpll, vfloat prec) const;
@@ -88,9 +81,6 @@ class plane : public absref {
 };
 
 std::ostream& operator<<(std::ostream& file, const plane& s);
-
 }
-
-#include "wcpplib/geometry/polyline.h"
 
 #endif

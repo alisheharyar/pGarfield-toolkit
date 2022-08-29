@@ -1,0 +1,43 @@
+#!/bin/sh
+#SBATCH -J DemoJob
+#SBATCH -p l_long
+#SBATCH --qos=ll
+#SBATCH --time=167:28:00
+#SBATCH --ntasks=24
+#SBATCH --output=%j.out
+#SBATCH --error=%j.err
+#SBATCH --hint=nomultithread
+
+SRC_DIR=/ddn/home/wecaden08/Tests/Parallel/MIP/SRC
+WORK_DIR=/ddn/home/wecaden08/Tests/Parallel/MIP/OUTPUT
+cd $WORK_DIR
+Name=TEST
+
+TDIR=$Name
+mkdir $TDIR
+cp $SRC_DIR/card.ini $TDIR/
+cp $SRC_DIR/gem2B.C $TDIR
+cp $SRC_DIR/makefile $TDIR
+cp $SRC_DIR/read_card.h $TDIR
+cd $TDIR
+sed -i 's/^CXX = mpicxx/CXX = GCC/' makefile
+pwd
+
+
+module load garfield/parallel
+module sw PrgEnv-cray PrgEnv-intel
+module load craype-hugepages8M
+
+
+export GARFIELD_HOME=/ddn/home/wecaden08/Garfield/parallel
+export HEED_DATABASE=/ddn/home/wecaden08/Garfield/parallel/Heed/heed++/database/
+
+
+
+rm ./gem2B
+make gem2B
+time srun ./gem2B --card card.ini
+
+mv $WORK_DIR/$SLURM_JOBID.out $WORK_DIR/$Name/
+mv $WORK_DIR/$SLURM_JOBID.err $WORK_DIR/$Name/
+

@@ -2,37 +2,37 @@
 #define EPARTICLE_H
 #include "wcpplib/geometry/mparticle.h"
 #include "wcpplib/particle/particle_def.h"
+#include "HeedFieldMap.h"
 
-/*
-Charged particle, combination of features of massive geometrical
-particle and specification of concrete particle as one of types
-known by science.
-
-1998 - 2004, I. Smirnov.
-*/
+// 1998 - 2004, I. Smirnov.
 
 namespace Heed {
 
-class eparticle : public mparticle, public particle_type {
+/// Charged particle. Combination of features of massive geometrical
+/// particle and specification of concrete particle as one of types
+/// known by science.
+
+class eparticle : public mparticle /*, public particle_type*/ {
  public:
-  /// Constructors
-  eparticle(void) : mparticle(), particle_type() {}
+  /// Default constructor
+  eparticle() = default;
+  /// Constructor using velocity vector.
   eparticle(manip_absvol* primvol, const point& pt, const vec& vel, vfloat time,
-            particle_def* fpardef);
-  eparticle(manip_absvol* primvol, const point& pt,
-            const vec& vel,  // length does not have meaning
-            vfloat time, particle_def* fpardef, double gamma_1);
-  AnyType_copy(eparticle, gparticle);
+            particle_def* fpardef, HeedFieldMap* fieldmap);
   /// Destructor
-  virtual ~eparticle() { ; }
-  virtual void print(std::ostream& file, int l) const;
+  virtual ~eparticle() {}
 
-  virtual int force(const point& pt, vec& f, vec& f_perp, vfloat& mrange);
-  // if returns 0 then no force, but it should fill zero to f anyway
+  eparticle* copy() const override { return new eparticle(*this); }
+  void print(std::ostream& file, int l) const override;
+
+ protected:
+  /// Calculate force components.
+  int force(const point& pt, vec& f, vec& f_perp, vfloat& mrange) override;
   // mrange - distance at which the force should not change much
-
+  particle_def* m_pardef = nullptr;
+  /// Pointer to field map.
+  HeedFieldMap* m_fieldMap = nullptr;
 };
-
 }
 
 #endif

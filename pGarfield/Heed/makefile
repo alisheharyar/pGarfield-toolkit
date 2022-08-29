@@ -5,6 +5,7 @@ LIBDIR = $(GARFIELD_HOME)/Library
 HEEDDIR = $(GARFIELD_HOME)/Heed
 
 HEEDOBJS = \
+  $(OBJDIR)/Heed/HeedFieldMap.o \
 	$(OBJDIR)/Heed/FunNameStack.o \
 	$(OBJDIR)/Heed/definp.o \
 	$(OBJDIR)/Heed/findmark.o \
@@ -15,7 +16,6 @@ HEEDOBJS = \
 	$(OBJDIR)/Heed/PointsRan.o \
 	$(OBJDIR)/Heed/pois.o \
 	$(OBJDIR)/Heed/rnorm.o \
-	$(OBJDIR)/Heed/eiparticle.o \
 	$(OBJDIR)/Heed/eparticle.o \
 	$(OBJDIR)/Heed/particle_def.o \
 	$(OBJDIR)/Heed/AtomDef.o \
@@ -29,7 +29,7 @@ HEEDOBJS = \
 	$(OBJDIR)/Heed/kinem.o \
 	$(OBJDIR)/Heed/linexi2.o \
 	$(OBJDIR)/Heed/lorgamma.o \
-	$(OBJDIR)/Heed/parabol.o \
+	$(OBJDIR)/Heed/parabola.o \
 	$(OBJDIR)/Heed/PolLeg.o \
 	$(OBJDIR)/Heed/bethe_bloch.o \
 	$(OBJDIR)/Heed/e_cont_enloss.o \
@@ -59,9 +59,13 @@ HEEDOBJS += \
 	$(OBJDIR)/Heed/HeedParticle.o \
 	$(OBJDIR)/Heed/HeedPhoton.o \
 	$(OBJDIR)/Heed/PairProd.o \
-	$(OBJDIR)/Heed/ParticleBank.o \
 	$(OBJDIR)/Heed/PhotoAbsCS.o \
 	$(OBJDIR)/Heed/PhotoAbsCSLib.o
+
+# C++ compiler if parallel mode is enabled
+ifdef PARALLEL
+CXX = mpicxx
+endif
 
 # Compilation flags
 CFLAGS = -Wall -Wextra -pedantic -ansi -Wabi -Wno-long-long \
@@ -73,6 +77,11 @@ CFLAGS = -Wall -Wextra -pedantic -ansi -Wabi -Wno-long-long \
 # Debugging flags
 #CFLAGS += -g
 
+ifdef PARALLEL
+CFLAGS += -DPARALLEL
+endif
+
+
 # Linking flags
 LDFLAGS = `root-config --glibs` -lGeom -lgfortran -lm
 
@@ -81,6 +90,12 @@ all:	$(HEEDOBJS)
 clean:
 	@echo Removing Heed object files...
 	@$(RM) $(HEEDOBJS) 
+
+$(OBJDIR)/Heed/HeedFieldMap.o: \
+	$(HEEDDIR)/HeedFieldMap.cpp\
+	$(HEEDDIR)/HeedFieldMap.h
+	@echo $@
+	@$(CXX) $(CFLAGS) $< -o $@
 
 $(OBJDIR)/Heed/FunNameStack.o: \
 	$(HEEDDIR)/wcpplib/util/FunNameStack.cpp\
@@ -142,11 +157,6 @@ $(OBJDIR)/Heed/rnorm.o: \
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 
-$(OBJDIR)/Heed/eiparticle.o: \
-	$(HEEDDIR)/wcpplib/particle/eiparticle.cpp\
-	$(HEEDDIR)/wcpplib/particle/eiparticle.h
-	@echo $@
-	@$(CXX) $(CFLAGS) $< -o $@
 
 $(OBJDIR)/Heed/eparticle.o: \
 	$(HEEDDIR)/wcpplib/particle/eparticle.cpp\
@@ -169,12 +179,6 @@ $(OBJDIR)/Heed/AtomDef.o: \
 $(OBJDIR)/Heed/GasDef.o: \
 	$(HEEDDIR)/wcpplib/matter/GasDef.cpp\
 	$(HEEDDIR)/wcpplib/matter/GasDef.h
-	@echo $@
-	@$(CXX) $(CFLAGS) $< -o $@
-
-$(OBJDIR)/Heed/GasLib.o: \
-	$(HEEDDIR)/wcpplib/matter/GasLib.cpp\
-	$(HEEDDIR)/wcpplib/matter/GasLib.h
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 
@@ -238,9 +242,9 @@ $(OBJDIR)/Heed/lorgamma.o: \
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 
-$(OBJDIR)/Heed/parabol.o: \
-	$(HEEDDIR)/wcpplib/math/parabol.cpp\
-	$(HEEDDIR)/wcpplib/math/parabol.h
+$(OBJDIR)/Heed/parabola.o: \
+	$(HEEDDIR)/wcpplib/math/parabola.cpp\
+	$(HEEDDIR)/wcpplib/math/parabola.h
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 
@@ -413,12 +417,6 @@ $(OBJDIR)/Heed/PairProd.o: \
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 
-$(OBJDIR)/Heed/ParticleBank.o: \
-	$(HEEDDIR)/heed++/code/ParticleBank.cpp \
-	$(HEEDDIR)/heed++/code/ParticleBank.h
-	@echo $@
-	@$(CXX) $(CFLAGS) $< -o $@
-
 $(OBJDIR)/Heed/PhotoAbsCS.o: \
 	$(HEEDDIR)/heed++/code/PhotoAbsCS.cpp \
 	$(HEEDDIR)/heed++/code/PhotoAbsCS.h
@@ -427,9 +425,7 @@ $(OBJDIR)/Heed/PhotoAbsCS.o: \
 
 $(OBJDIR)/Heed/PhotoAbsCSLib.o: \
 	$(HEEDDIR)/heed++/code/PhotoAbsCSLib.cpp \
-	$(HEEDDIR)/heed++/code/PhotoAbsCSLib.h \
-	$(HEEDDIR)/wcpplib/matter/GasLib.cpp\
-	$(HEEDDIR)/wcpplib/matter/GasLib.h
+	$(HEEDDIR)/heed++/code/PhotoAbsCSLib.h
 	@echo $@
 	@$(CXX) $(CFLAGS) $< -o $@
 

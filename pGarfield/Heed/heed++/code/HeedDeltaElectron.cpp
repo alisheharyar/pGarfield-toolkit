@@ -1,538 +1,373 @@
 #include "wcpplib/clhep_units/WPhysicalConstants.h"
 #include "wcpplib/random/ranluxint.h"
-#include "wcpplib/random/chisran.h"
 #include "wcpplib/random/pois.h"
 #include "wcpplib/random/rnorm.h"
 #include "heed++/code/HeedDeltaElectron.h"
 #include "heed++/code/HeedDeltaElectronCS.h"
-#include "heed++/code/HeedCondElectron.h"
 
-/*
-2003, I. Smirnov
-*/
+// 2003, I. Smirnov
 
 #define USE_ADJUSTED_W
 #define RANDOM_POIS
-#define DIRECT_LOW_IF_LITTLE
+
+namespace {
+
+long findInterval(Heed::EnergyMesh* emesh, const double energy) {
+
+  const long n = emesh->get_interval_number_between_centers(energy);
+  return std::min(std::max(n, 0L), emesh->get_q() - 2);
+}
+
+double interpolate(Heed::EnergyMesh* emesh, const double x,
+                   const std::vector<double>& y) {
+
+  const long n = findInterval(emesh, x);
+  const double x1 = emesh->get_ec(n);
+  const double x2 = emesh->get_ec(n + 1);
+  const double y1 = y[n];
+  const double y2 = y[n + 1];
+  return y1 + (x - x1) * (y2 - y1) / (x2 - x1);
+}
+
+double sample_ctheta(const double sigma) {
+  double ctheta = 0.;
+  do {
+    double y = Heed::SRANLUX();
+    while (y == 1.) {
+      y = Heed::SRANLUX();
+    }
+    const double x = sigma * (-log(1.0 - y));
+    ctheta = 1. - x;
+  } while (ctheta <= -1.0);
+  return ctheta;
+}
+
+}
 
 namespace Heed {
 
-const long max_q_low_path_length_for_direct = 5;
+using CLHEP::degree;
+using CLHEP::cm;
+using CLHEP::eV;
+using CLHEP::keV;
+using CLHEP::MeV;
+using CLHEP::c_light;
+using CLHEP::c_squared;
 
-int HeedDeltaElectron::s_low_mult_scattering = 1;
-int HeedDeltaElectron::s_high_mult_scattering = 1;
+bool HeedDeltaElectron::s_low_mult_scattering = true;
+bool HeedDeltaElectron::s_high_mult_scattering = true;
+bool HeedDeltaElectron::s_direct_low_if_little = true;
 
 HeedDeltaElectron::HeedDeltaElectron(manip_absvol* primvol, const point& pt,
-                                     const vec& vel, vfloat time,
+                                     const vec& vel, vfloat ftime,
                                      long fparent_particle_number,
-                                     //PassivePtr< gparticle > fparent_part
-                                     int fs_print_listing)
-    : eparticle(primvol, pt, vel, time, &electron_def),
-      //parent_part(fparent_part),
-      s_print_listing(fs_print_listing),
-      phys_mrange(0.0),
-      s_stop_eloss(0),
-      s_mult_low_path_length(0),
-      q_low_path_length(0.0),
-      s_path_length(0),
-      necessary_energy(0.0),
-      parent_particle_number(fparent_particle_number) {
+                                     HeedFieldMap* fieldmap,
+                                     bool fprint_listing)
+    : eparticle(primvol, pt, vel, ftime, &electron_def, fieldmap),
+      parent_particle_number(fparent_particle_number),
+      m_particle_number(s_counter++),
+      m_print_listing(fprint_listing) {
   mfunname("HeedDeltaElectron::HeedDeltaElectron(...)");
-  particle_number = last_particle_number;
-  last_particle_number++;
-  //if(particle_number == 247)  // for debug of particular event
-  //s_print_listing = 1;
-  //set_count_references();
-
 }
 
 void HeedDeltaElectron::physics_mrange(double& fmrange) {
   mfunname("void HeedDeltaElectron::physics_mrange(double& fmrange)");
-  if (s_print_listing == 1) {
-    mcout << "void HeedDeltaElectron::physics_mrange(double& fmrange)"
-          << std::endl;
-  }
-  s_mult_low_path_length = 0;
-  q_low_path_length = 0.0;
-  s_path_length = 0;
+  if (m_print_listing) mcout << "HeedDeltaElectron::physics_mrange\n";
+
+  m_mult_low_path_length = false;
+  m_q_low_path_length = 0.0;
+  m_path_length = false;
   if (fmrange <= 0.0) return;
-  if (curr_kin_energy == 0.0) {
+  if (m_curr_ekin <= 0.0) {
     fmrange = 0.0;
     return;
   }
-  const absvol* av = currpos.G_lavol();  // get least address of volume
-  const HeedDeltaElectronCSType* hmecst =
-      dynamic_cast<const HeedDeltaElectronCSType*>(av);
-  if (hmecst == NULL) return;
-  if (s_print_listing == 1) Iprintnf(mcout, fmrange);
-  // calculate eloss and mrange as follows from eloss
-  HeedDeltaElectronCS* hdecs = hmecst->hdecs.getver();
-  double ek = curr_kin_energy / MeV;
-  EnergyMesh* emesh = hdecs->hmd->energy_mesh.get();
-  long n1 = emesh->get_interval_number_between_centers(ek);
-  long qener = emesh->get_q();
-  if (n1 < 0) n1 = 0;
-  if (n1 > qener - 2) n1 = qener - 2;
-  long n2 = n1 + 1;
-  double dedx = hdecs->eLoss[n1] + (hdecs->eLoss[n2] - hdecs->eLoss[n1]) /
-                                       (emesh->get_ec(n2) - emesh->get_ec(n1)) *
-                                       (ek - emesh->get_ec(n1));
-  //double ek_reduced = ek * 0.9;
-  double eloss = 0.1 * ek;               // MeV
-  if (eloss < 0.00005) eloss = 0.00005;  // loss by 50eV
+  // Get local volume and convert it to a cross-section object.
+  const absvol* av = m_currpos.volume();
+  auto hdecs = dynamic_cast<const HeedDeltaElectronCS*>(av);
+  if (!hdecs) return;
+  if (m_print_listing) Iprintnf(mcout, fmrange);
+  const double ek = m_curr_ekin / MeV;
+  // Get the dE/dx at this kinetic energy.
+  EnergyMesh* emesh = hdecs->hmd->energy_mesh;
+  const double dedx = interpolate(emesh, ek, hdecs->eLoss);
+  // Min. loss 50 eV.
+  double eloss = std::max(0.1 * ek, 0.00005);
   if (eloss > ek) {
     eloss = ek;
-    s_stop_eloss = 1;
+    m_stop_eloss = true;
   } else {
-    s_stop_eloss = 0;
+    m_stop_eloss = false;
   }
-  double mrange = (eloss / dedx) * cm;
-  if (fmrange > mrange) fmrange = mrange;
-  if (s_print_listing == 1) {
-    Iprintnf(mcout, fmrange);
-    Iprintnf(mcout, ek);
-  }
-  double ek_restricted = ek;
-  if (ek_restricted < 0.0005) ek_restricted = 0.0005;
-  if (s_print_listing == 1) Iprintnf(mcout, ek_restricted / keV);
+  fmrange = std::min(fmrange, (eloss / dedx) * cm);
+  if (m_print_listing) Iprint2nf(mcout, fmrange, ek);
+  const double ek_restr = std::max(ek, 0.0005);
+  if (m_print_listing) Iprintnf(mcout, ek_restr / keV);
 
-  long n1r = emesh->get_interval_number_between_centers(ek_restricted);
-  if (n1r < 0) n1r = 0;
-  if (n1r > qener - 2) n1r = qener - 2;
-  long n2r = n1r + 1;
   double low_path_length = 0.;  // in internal units
-  if (s_low_mult_scattering == 1) {
-    low_path_length = (hdecs->low_lambda[n1r] +
-                       (hdecs->low_lambda[n2r] - hdecs->low_lambda[n1r]) /
-                           (emesh->get_ec(n2r) - emesh->get_ec(n1r)) *
-                           (ek_restricted - emesh->get_ec(n1r))) * cm;
-    if (s_print_listing == 1) Iprintnf(mcout, low_path_length / cm);
+  if (s_low_mult_scattering) {
+    low_path_length = interpolate(emesh, ek_restr, hdecs->low_lambda) * cm;
+    if (m_print_listing) Iprintnf(mcout, low_path_length / cm);
     long qscat = hdecs->eesls->get_qscat();
-    double sigma_ctheta = hdecs->get_sigma(ek_restricted, qscat);
+    const double sigma_ctheta = hdecs->get_sigma(ek_restr, qscat);
     // Reduce the number of scatterings, if the angle is too large.
     if (sigma_ctheta > 0.3) qscat = long(qscat * 0.3 / sigma_ctheta);
-    double mult_low_path_length = qscat * low_path_length;
-    if (s_print_listing == 1) Iprintnf(mcout, mult_low_path_length);
+    const double mult_low_path_length = qscat * low_path_length;
+    if (m_print_listing) Iprintnf(mcout, mult_low_path_length);
     if (fmrange > mult_low_path_length) {
       fmrange = mult_low_path_length;
-      s_mult_low_path_length = 1;
-      q_low_path_length = hdecs->eesls->get_qscat();
-      s_stop_eloss = 0;
+      m_mult_low_path_length = true;
+      m_q_low_path_length = hdecs->eesls->get_qscat();
+      m_stop_eloss = false;
     } else {
-      s_mult_low_path_length = 0;
-      q_low_path_length = fmrange / low_path_length;
+      m_mult_low_path_length = false;
+      m_q_low_path_length = fmrange / low_path_length;
     }
-    if (s_print_listing == 1) {
-      Iprintnf(mcout, fmrange);
-      Iprintnf(mcout, q_low_path_length);
-    }
+    if (m_print_listing) Iprint2nf(mcout, fmrange, m_q_low_path_length);
   }
 
-  if (s_high_mult_scattering == 1) {
-    if (s_print_listing == 1) {
-      Iprintf(mcout, currpos.pt);
-      Iprintnf(mcout, n1r);
-      Iprintnf(mcout, n2r);
-      Iprintnf(mcout, ek_restricted);
-      Iprintnf(mcout, emesh->get_ec(n1r));
-      Iprintnf(mcout, emesh->get_ec(n2r));
-    }
-    double mean_path_length =
-        (hdecs->lambda[n1r] + (hdecs->lambda[n2r] - hdecs->lambda[n1r]) /
-                                  (emesh->get_ec(n2r) - emesh->get_ec(n1r)) *
-                                  (ek_restricted - emesh->get_ec(n1r))) * cm;
-    if (s_print_listing == 1) {
-      Iprintnf(mcout, mean_path_length);
-      Iprintnf(mcout, mean_path_length / cm);
-    }
-    double path_length = -mean_path_length * log(1.0 - SRANLUX());
-    if (s_print_listing == 1) Iprintnf(mcout, path_length);
+  if (s_high_mult_scattering) {
+    const double mean_path = interpolate(emesh, ek_restr, hdecs->lambda);
+    if (m_print_listing) Iprintnf(mcout, mean_path);
+    const double path_length = -mean_path * cm * log(1.0 - SRANLUX());
+    if (m_print_listing) Iprintnf(mcout, path_length);
     if (fmrange > path_length) {
       fmrange = path_length;
-      s_path_length = 1;
-      s_mult_low_path_length = 0;
-      if (s_low_mult_scattering == 1) {
-        q_low_path_length = fmrange / low_path_length;
-        if (s_print_listing == 1) Iprintnf(mcout, q_low_path_length);
+      m_path_length = true;
+      m_mult_low_path_length = true;
+      if (s_low_mult_scattering) {
+        m_q_low_path_length = fmrange / low_path_length;
+        if (m_print_listing) Iprintnf(mcout, m_q_low_path_length);
       }
-      s_stop_eloss = 0;
+      m_stop_eloss = false;
     } else {
-      s_path_length = 0;
+      m_path_length = false;
     }
-    if (s_print_listing == 1) Iprintnf(mcout, fmrange);
+    if (m_print_listing) Iprintnf(mcout, fmrange);
   }
-  phys_mrange = fmrange;
+  m_phys_mrange = fmrange;
 }
 
-void HeedDeltaElectron::physics_after_new_speed(void) {
-  mfunname("void HeedDeltaElectron::physics_after_new_speed(void)");
-  if (s_print_listing == 1) {
-    mcout << "HeedDeltaElectron::physics_after_new_speed is started\n";
-    Iprint2n(mcout, currpos.prange, curr_kin_energy);
+void HeedDeltaElectron::physics_after_new_speed(
+    std::vector<gparticle*>& /*secondaries*/) {
+  mfunname("void HeedDeltaElectron::physics_after_new_speed()");
+  if (m_print_listing) {
+    mcout << "HeedDeltaElectron::physics_after_new_speed\n";
+    Iprint2n(mcout, m_currpos.prange, m_curr_ekin);
   }
   check_econd11(vecerror, != 0, mcerr);
-  if (currpos.prange <= 0.0) {
-    if (curr_kin_energy == 0.0) {
-      // Get least address of volume.
-      absvol* av = currpos.G_lavol();
-      SensitiveVolume* asv = dynamic_cast<SensitiveVolume*>(av);
-      if (asv != NULL) {
-        if (s_print_listing == 1) {
-          mcout << "HeedDeltaElectron::physics_after_new_speed: \n";
-          mcout << "This is converted to conduction\n";
-        }
-        HeedCondElectron hce(currpos.ptloc, currpos.time);
-        //HeedCondElectron hce(currpos.pt, currpos.ptloc, currpos.tid, this);
-        asv->conduction_electron_bank.append(hce);
-        //conduction_electron_bank.insert_after
-        //( conduction_electron_bank.get_last_node(), hce);
+  if (m_currpos.prange <= 0.0) {
+    if (m_curr_ekin <= 0.0) {
+      // Get local volume.
+      absvol* av = m_currpos.volume();
+      if (av && av->s_sensitive && m_fieldMap->inside(m_currpos.ptloc)) {
+        if (m_print_listing) mcout << "Convert to conduction electron.\n";
+        conduction_electrons.emplace_back(
+            HeedCondElectron(m_currpos.ptloc, m_currpos.time));
       }
-      s_life = 0;
+      m_alive = false;
     }
-    if (s_print_listing == 1) mcout << "exit due to currpos.prange <= 0.0\n";
+    if (m_print_listing) mcout << "exit due to currpos.prange <= 0.0\n";
     return;
   }
-  // Get least address of volume
-  const absvol* av = currpos.G_lavol();
-  const HeedDeltaElectronCSType* hmecst =
-      dynamic_cast<const HeedDeltaElectronCSType*>(av);
-  if (s_print_listing == 1)
-    mcout << "physics_after_new_speed: started" << std::endl;
-  if (hmecst == NULL) return;
-  HeedDeltaElectronCS* hdecs = hmecst->hdecs.get();
-  double ek = curr_kin_energy / MeV;
-  EnergyMesh* emesh = hdecs->hmd->energy_mesh.get();
-  long n1 = emesh->get_interval_number_between_centers(ek);
-  long qener = emesh->get_q();
-  if (n1 < 0) n1 = 0;
-  if (n1 > qener - 2) n1 = qener - 2;
-  long n2 = n1 + 1;
-  if (s_print_listing == 1) {
+  // Get local volume and convert it to a cross-section object.
+  const absvol* av = m_currpos.volume();
+  auto hdecs = dynamic_cast<const HeedDeltaElectronCS*>(av);
+  if (!hdecs) return;
+  double ek = m_curr_ekin / MeV;
+  if (m_print_listing) {
     Iprintnf(mcout, ek);
-    Iprint2n(mcout, n1, n2);
-    Iprint3n(mcout, s_stop_eloss, phys_mrange, currpos.prange);
+    Iprint3n(mcout, m_stop_eloss, m_phys_mrange, m_currpos.prange);
   }
-  /*
-  double dedx = hdecs->eLoss[n1] +
-    (hdecs->eLoss[n2] - hdecs->eLoss[n1])/
-    (emesh->get_ec(n2) - emesh->get_ec(n1)) *
-    (ek - emesh->get_ec(n1));
-  double Eloss = dedx * MeV/cm;
-  Eloss *= currpos.prange;
-  if(s_print_listing == 1) Iprintn(mcout, Eloss/eV);
-  total_Eloss += Eloss;
-  curr_kin_energy -= Eloss;
-  */
+  // Calculate dE/dx and energy loss. Update the kinetic energy.
   double dedx;
-  double Eloss;
-  if (s_stop_eloss == 1 && phys_mrange == currpos.prange) {
-    Eloss = curr_kin_energy;
-    curr_kin_energy = 0.0;
-    dedx = Eloss / currpos.prange / (MeV / cm);
+  double Eloss = 0.;
+  if (m_stop_eloss && m_phys_mrange == m_currpos.prange) {
+    Eloss = m_curr_ekin;
+    m_curr_ekin = 0.0;
+    dedx = Eloss / m_currpos.prange / (MeV / cm);
   } else {
-    dedx = hdecs->eLoss[n1] + (hdecs->eLoss[n2] - hdecs->eLoss[n1]) /
-                                  (emesh->get_ec(n2) - emesh->get_ec(n1)) *
-                                  (ek - emesh->get_ec(n1));
-    Eloss = dedx * MeV / cm;
-    Eloss *= currpos.prange;
-    total_Eloss += Eloss;
-    curr_kin_energy -= Eloss;
+    EnergyMesh* emesh = hdecs->hmd->energy_mesh;
+    dedx = interpolate(emesh, ek, hdecs->eLoss);
+    Eloss = std::min(m_currpos.prange * dedx * MeV / cm, m_curr_ekin);
+    m_total_eloss += Eloss;
+    m_curr_ekin -= Eloss;
   }
-  if (s_print_listing == 1)
-    Iprint3nf(mcout, prev_kin_energy / eV, curr_kin_energy / eV, Eloss / eV);
-  if (curr_kin_energy <= 0.0) {
-    if (s_print_listing == 1) {
-      mcout << "curr_kin_energy <= 0.0, curr_kin_energy=" << curr_kin_energy
-            << " curr_kin_energy/MeV=" << curr_kin_energy / MeV << '\n';
-    }
-    curr_kin_energy = 0.0;
-    curr_gamma_1 = 0.0;
-    currpos.speed = 0.0;
-    s_life = 0;
+  if (m_print_listing)
+    Iprint3nf(mcout, m_prev_ekin / eV, m_curr_ekin / eV, Eloss / eV);
+  if (m_curr_ekin <= 0.0) {
+    if (m_print_listing) mcout << "m_curr_ekin <= 0.0\n";
+    m_curr_ekin = 0.0;
+    m_curr_gamma_1 = 0.0;
+    m_currpos.speed = 0.0;
+    m_alive = false;
   } else {
-    double resten = mass * c_squared;
-    curr_gamma_1 = curr_kin_energy / resten;
-    currpos.speed = c_light * lorbeta(curr_gamma_1);
+    const double resten = m_mass * c_squared;
+    m_curr_gamma_1 = m_curr_ekin / resten;
+    m_currpos.speed = c_light * lorbeta(m_curr_gamma_1);
   }
-  absvol* vav = currpos.G_lavol();
-  SensitiveVolume* asv = dynamic_cast<SensitiveVolume*>(vav);
-  if (asv != NULL) {
-    if (s_print_listing == 1) {
+  absvol* vav = m_currpos.volume();
+  if (vav && vav->s_sensitive) {
+    if (m_print_listing) {
       mcout << "volume is sensitive\n";
-      Iprintnf(mcout, Eloss / eV);
-      Iprintnf(mcout, necessary_energy / eV);
+      Iprint2nf(mcout, Eloss / eV, m_necessary_energy / eV);
     }
-    if (Eloss > 0.0) {
-      if (Eloss >= necessary_energy) {
-        // can leave electrons
-        // there is no need to recalculate mean energy loss per 1 cm,
-        // since necessary_energy is not an addition
-        if (s_print_listing == 1) {
-          mcout << "\nstart to leave conduction electrons" << std::endl;
-          //Iprintnf(mcout, Eloss/eV);
-          //Iprintnf(mcout, necessary_energy/eV);
-          Iprintnf(mcout, dedx);
-        }
-        if (necessary_energy <= 0.0) {
-#ifdef USE_ADJUSTED_W
-          necessary_energy =
-              hdecs->pairprod->get_eloss(prev_kin_energy / eV) * eV;
-#else
-          necessary_energy = hdecs->pairprod->get_eloss() * eV;
-#endif
-        }
-        if (s_print_listing == 1) Iprintnf(mcout, necessary_energy / eV);
-        double Eloss_left = Eloss;
-        point curpt = prevpos.pt;
-        vec dir = prevpos.dir;  // this approximation ignores curvature
-        double curr_kin_energy_for_cond = prev_kin_energy;
-        if (s_print_listing == 1) Iprintnf(mcout, curpt);
-        // then at each step necessary_energy is energy due to expend till
-        // next conduction electron
-        while (Eloss_left >= necessary_energy) {
-          // this condition provides
-          // also that the current electron energy is non negative
-          double step_length = necessary_energy / (dedx * MeV / cm);
-          if (s_print_listing == 1) Iprintnf(mcout, step_length);
-          curpt = curpt + dir * step_length;
-          if (s_print_listing == 1) Iprintf(mcout, curpt);
-          point ptloc = curpt;
-          prevpos.tid.up_absref(&ptloc);
-          if (s_print_listing == 1) mcout << "New conduction electron\n";
-          HeedCondElectron hce(ptloc, currpos.time);
-          //HeedCondElectron hce(curpt, ptloc, prevpos.tid, this);
-          asv->conduction_electron_bank.append(hce);
-          //conduction_electron_bank.insert_after
-          //  ( conduction_electron_bank.get_last_node(), hce);
-          Eloss_left -= necessary_energy;
-          curr_kin_energy_for_cond -= necessary_energy;
-// generate next random energy
-#ifdef USE_ADJUSTED_W
-          necessary_energy =
-              eV * hdecs->pairprod->get_eloss(curr_kin_energy_for_cond / eV);
-#else
-          necessary_energy = hdecs->pairprod->get_eloss() * eV;
-#endif
-          if (s_print_listing == 1) {
-            Iprintnf(mcout, Eloss_left / eV);
-            Iprint2nf(mcout, curr_kin_energy_for_cond / eV,
-                      necessary_energy / eV);
-          }
-        }
-        necessary_energy -= Eloss_left;
-        if (s_print_listing == 1) Iprintnf(mcout, necessary_energy / eV);
-      } else {
-        necessary_energy -= Eloss;
-      }
-    }
+    if (Eloss > 0.0) ionisation(Eloss, dedx, hdecs->pairprod);
   }
-  if (s_print_listing == 1) {
+  if (m_print_listing) {
     mcout << '\n';
-    Iprintn(mcout, s_life);
+    Iprintn(mcout, m_alive);
   }
-  if (s_life == 1) {
-    if (s_print_listing == 1) mcout << "\nstart to rotate by low angle\n";
-    double ek_restricted = ek;
-    if (ek_restricted < 0.0005) ek_restricted = 0.0005;
-    if (s_print_listing == 1) {
-      Iprintnf(mcout, currpos.prange);
-      Iprintnf(mcout, phys_mrange);
+  if (!m_alive) {
+    // Done tracing the delta electron. Create the last conduction electron.
+    vav = m_currpos.volume();
+    if (vav && vav->s_sensitive && m_fieldMap->inside(m_currpos.ptloc)) {
+      if (m_print_listing) mcout << "Last conduction electron\n";
+      conduction_electrons.emplace_back(
+          HeedCondElectron(m_currpos.ptloc, m_currpos.time));
     }
-    if (currpos.prange < phys_mrange) {
-      // recalculate scatterings
-      s_path_length = 0;
-      if (s_low_mult_scattering == 1) {
-        long n1r = emesh->get_interval_number_between_centers(ek_restricted);
-        if (n1r < 0) n1r = 0;
-        if (n1r > qener - 2) n1r = qener - 2;
-        long n2r = n1r + 1;
-        double low_path_length;  // in internal units
-        if (s_low_mult_scattering == 1) {
-          low_path_length = (hdecs->low_lambda[n1r] +
-                             (hdecs->low_lambda[n2r] - hdecs->low_lambda[n1r]) /
-                                 (emesh->get_ec(n2r) - emesh->get_ec(n1r)) *
-                                 (ek_restricted - emesh->get_ec(n1r))) * cm;
-          if (s_print_listing == 1) Iprintnf(mcout, low_path_length / cm);
-          s_mult_low_path_length = 0;
-          q_low_path_length = currpos.prange / low_path_length;
-          if (s_print_listing == 1) Iprintnf(mcout, q_low_path_length);
-        }
-      }
-    }
-    if (s_print_listing == 1) Iprintnf(mcout, q_low_path_length);
-#ifdef RANDOM_POIS
-    long random_q_low_path_length = 0;
-    if (q_low_path_length > 0.0) {
-      int ierror = 0;
-      random_q_low_path_length = pois(q_low_path_length, ierror);
-      check_econd11a(ierror, == 1,
-                     " q_low_path_length=" << q_low_path_length << '\n', mcerr);
-      q_low_path_length = long(random_q_low_path_length);
-      if (s_print_listing == 1) {
-        mcout << "After pois:\n";
-        Iprintnf(mcout, q_low_path_length);
-      }
-    }
-#endif
-    if (q_low_path_length > 0) {
-#ifdef DIRECT_LOW_IF_LITTLE
-      if (q_low_path_length < max_q_low_path_length_for_direct) {
-        // direct modeling
-        if (s_print_listing == 1) {
-          mcout << "direct modeling of low scatterings\n";
-          Iprint(mcout, currpos.dir);
-        }
-        long n1r = emesh->get_interval_number_between_centers(ek_restricted);
-        if (n1r < 0) n1r = 0;
-        if (n1r > qener - 1) n1r = qener - 1;
-        for (long nscat = 0; nscat < q_low_path_length; ++nscat) {
-          if (s_print_listing == 1) Iprintn(mcout, nscat);
-          double theta_rot =
-              hdecs->low_angular_points_ran[n1r].ran(SRANLUX()) / 180.0 * M_PI;
-          if (s_print_listing == 1)
-            Iprint2nf(mcout, theta_rot, theta_rot / M_PI * 180.0);
-          vec dir = currpos.dir;
-          //Iprint(mcout, dir);
-          basis temp(dir, "temp");
-          vec vturn;
-          vturn.random_round_vec();
-          vturn = vturn * sin(theta_rot);
-          vec new_dir(vturn.x, vturn.y, cos(theta_rot));
-          new_dir.down(&temp);
-          currpos.dir = new_dir;
-          if (s_print_listing == 1) Iprint(mcout, new_dir);
-        }
-        currpos.dirloc = currpos.dir;
-        currpos.tid.up_absref(&currpos.dirloc);
-      } else {
-#endif
-        double sigma_ctheta =
-            hdecs->get_sigma(ek_restricted, q_low_path_length);
-        // actually it is mean(1-cos(theta)) or
-        // sqrt( mean( square(1-cos(theta) ) ) ) depending on USE_MEAN_COEF
+    return;
+  }
 
-        if (s_print_listing == 1) Iprintnf(mcout, sigma_ctheta);
-        /*
-        This is for Gauss.
-        But actually exponential distribution fits better.
-        float r1 = SRANLUX();
-        float r2 = SRANLUX();
-        float x1, x2;
-        rnorm(r1, r2, x1, x2);
-        //Iprintn(mcout, x1);
-        double ctheta = 1.0 - fabs(x1 * sigma_ctheta);
-        // By the way,
-        // it seems that there were no condition > -1.0, this is error.
-        */
-        // Exponential:
-        double ctheta = 0.0;
-        {
-#ifdef USE_MEAN_COEF
-#else
-          double sq2 = sqrt(2.0);
-#endif
-          do {
-            double y = 0.0;
-            do {  // in order to avoid SRANLUX() = 1
-              y = SRANLUX();
-              if (s_print_listing == 1) Iprintnf(mcout, y);
-            } while (y == 1.0);
-#ifdef USE_MEAN_COEF
-            double x = sigma_ctheta * (-log(1.0 - y));
-#else
-            double x = sigma_ctheta * 1.0 / sq2 * (-log(1.0 - y));
-#endif
-            ctheta = 1.0 - x;
-            if (s_print_listing == 1) Iprint2nf(mcout, x, ctheta);
-          } while (ctheta <= -1.0);  // avoid absurd cos(theta)
-          check_econd21(ctheta, < -1.0 ||, > 1.0, mcerr);
-        }
-        if (s_print_listing == 1) Iprintnf(mcout, ctheta);
-        double theta_rot = acos(ctheta);
-        if (s_print_listing == 1) {
-          Iprint2nf(mcout, theta_rot, theta_rot / M_PI * 180.0);
-        }
-        vec dir = currpos.dir;
-        //Iprint(mcout, dir);
-        basis temp(dir, "temp");
-        //long n1r = emesh->get_interval_number_between_centers(ek_restricted);
-        //double theta_rot = angular_points_ran[nr1].ran(SRANLUX());
-        //Iprintn(mcout, theta_rot);
-        //double phi = 2.0 * M_PI * SRANLUX();
-        vec vturn;
-        vturn.random_round_vec();
-        vturn = vturn * sin(theta_rot);
-        vec new_dir(vturn.x, vturn.y, cos(theta_rot));
-        new_dir.down(&temp);
-        currpos.dir = new_dir;
-        //Iprint(mcout, new_dir);
-        currpos.dirloc = currpos.dir;
-        currpos.tid.up_absref(&currpos.dirloc);
-      }
-#ifdef DIRECT_LOW_IF_LITTLE
-    }
-#endif
-    if (s_path_length == 1) {
-      if (s_print_listing == 1) {
-        mcout << "\nstarting to rotate by large angle" << std::endl;
-        Iprintnf(mcout, s_path_length);
-      }
-      long n1r = emesh->get_interval_number_between_centers(ek_restricted);
-      if (n1r < 0) n1r = 0;
-      if (n1r > qener - 1) n1r = qener - 1;
-      double theta_rot =
-          hdecs->angular_points_ran[n1r].ran(SRANLUX()) / 180.0 * M_PI;
-      if (s_print_listing == 1) Iprintnf(mcout, theta_rot);
-      vec dir = currpos.dir;
-      //Iprint(mcout, dir);
-      basis temp(dir, "temp");
-      vec vturn;
-      vturn.random_round_vec();
-      vturn = vturn * sin(theta_rot);
-      vec new_dir(vturn.x, vturn.y, cos(theta_rot));
-      new_dir.down(&temp);
-      currpos.dir = new_dir;
-      //Iprint(mcout, new_dir);
-      currpos.dirloc = currpos.dir;
-      currpos.tid.up_absref(&currpos.dirloc);
-    }
-  } else {
-    // no need to scater
-    absvol* vav = currpos.G_lavol();  // get least address of volume
-    SensitiveVolume* asv = dynamic_cast<SensitiveVolume*>(vav);
-    if (asv != NULL) {
-      if (s_print_listing == 1) mcout << "Last conduction electron\n";
-      HeedCondElectron hce(currpos.ptloc, currpos.time);
-      //HeedCondElectron hce(currpos.pt, currpos.ptloc, currpos.tid, this);
-      asv->conduction_electron_bank.append(hce);
-      //conduction_electron_bank.insert_after
-      // ( conduction_electron_bank.get_last_node(), hce);
+  if (m_print_listing) mcout << "\nstart to rotate by low angle\n";
+  double ek_restr = std::max(ek, 0.0005);
+  if (m_print_listing) Iprint2nf(mcout, m_currpos.prange, m_phys_mrange);
+  if (m_currpos.prange < m_phys_mrange) {
+    // recalculate scatterings
+    m_path_length = false;
+    if (s_low_mult_scattering) {
+      EnergyMesh* emesh = hdecs->hmd->energy_mesh;
+      const double low_path_length = interpolate(emesh, ek_restr, hdecs->low_lambda) * cm;
+      if (m_print_listing) Iprintnf(mcout, low_path_length / cm);
+      m_mult_low_path_length = false;
+      m_q_low_path_length = m_currpos.prange / low_path_length;
+      if (m_print_listing) Iprintnf(mcout, m_q_low_path_length);
     }
   }
-  if (s_print_listing == 1) {
-    Iprintf(mcout, currpos.dir);
-    Iprintf(mcout, currpos.dirloc);
+  if (m_print_listing) Iprintnf(mcout, m_q_low_path_length);
+#ifdef RANDOM_POIS
+  if (m_q_low_path_length > 0.0) {
+    m_q_low_path_length = pois(m_q_low_path_length);
+    if (m_print_listing) {
+      mcout << "After pois:\n";
+      Iprintnf(mcout, m_q_low_path_length);
+    }
   }
+#endif
+  if (m_q_low_path_length > 0) {
+    if (s_direct_low_if_little && m_q_low_path_length < 5) {
+      // direct modeling
+      if (m_print_listing) {
+        mcout << "direct modeling of low scatterings\n";
+        Iprint(mcout, m_currpos.dir);
+      }
+      EnergyMesh* emesh = hdecs->hmd->energy_mesh;
+      const long n1r = findInterval(emesh, ek_restr);
+      for (long nscat = 0; nscat < m_q_low_path_length; ++nscat) {
+        if (m_print_listing) Iprintn(mcout, nscat);
+        const double theta =
+            hdecs->low_angular_points_ran[n1r].ran(SRANLUX()) * degree;
+        if (m_print_listing) Iprintnf(mcout, theta);
+        turn(cos(theta), sin(theta));
+      }
+    } else {
+      const double sigma = hdecs->get_sigma(ek_restr, m_q_low_path_length);
+      // actually it is mean(1-cos(theta)) or
+      // sqrt(mean(square(1-cos(theta)))) depending on USE_MEAN_COEF
+      if (m_print_listing) Iprintnf(mcout, sigma);
+      // Gauss:
+      // double ctheta = 1.0 - fabs(rnorm_improved() * sigma);
+      // Exponential distribution fits better:
+#ifdef USE_MEAN_COEF
+      const double ctheta = sample_ctheta(sigma);
+#else
+      const double ctheta = sample_ctheta(sigma / sqrt(2.));
+#endif
+      if (m_print_listing) Iprintnf(mcout, ctheta);
+      const double theta = acos(ctheta);
+      if (m_print_listing) Iprint2nf(mcout, theta, theta / degree);
+      turn(ctheta, sin(theta));
+    }
+  }
+  if (m_path_length) {
+    if (m_print_listing) {
+      mcout << "\nstarting to rotate by large angle" << std::endl;
+      Iprintnf(mcout, m_path_length);
+    }
+    EnergyMesh* emesh = hdecs->hmd->energy_mesh;
+    const long n1r = findInterval(emesh, ek_restr);
+    const double theta = hdecs->angular_points_ran[n1r].ran(SRANLUX()) * degree;
+    if (m_print_listing) Iprintnf(mcout, theta);
+    turn(cos(theta), sin(theta));
+  }
+  if (m_print_listing) Iprint2nf(mcout, m_currpos.dir, m_currpos.dirloc);
+}
+
+void HeedDeltaElectron::ionisation(const double eloss, const double dedx,
+                                   PairProd* pairprod) {
+
+  if (eloss < m_necessary_energy) {
+    m_necessary_energy -= eloss;
+    return;
+  }
+
+  if (m_print_listing) mcout << "\nstart to leave conduction electrons\n";
+  if (m_necessary_energy <= 0.0) {
+#ifdef USE_ADJUSTED_W
+    m_necessary_energy = pairprod->get_eloss(m_prev_ekin / eV) * eV;
+#else
+    m_necessary_energy = pairprod->get_eloss() * eV;
+#endif
+  }
+  if (m_print_listing) Iprintnf(mcout, m_necessary_energy / eV);
+  double eloss_left = eloss;
+  point curpt = m_prevpos.pt;
+  vec dir = m_prevpos.dir;  // this approximation ignores curvature
+  double ekin = m_prev_ekin;
+  if (m_print_listing) Iprintnf(mcout, curpt);
+  while (eloss_left >= m_necessary_energy) {
+    const double step_length = m_necessary_energy / (dedx * MeV / cm);
+    if (m_print_listing) Iprintnf(mcout, step_length);
+    curpt = curpt + dir * step_length;
+    if (m_print_listing) Iprintf(mcout, curpt);
+    point ptloc = curpt;
+    m_prevpos.tid.up_absref(&ptloc);
+    if (m_print_listing) mcout << "New conduction electron\n";
+    if (m_fieldMap->inside(ptloc)) {
+      conduction_electrons.emplace_back(HeedCondElectron(ptloc, m_currpos.time));
+      conduction_ions.emplace_back(HeedCondElectron(ptloc, m_currpos.time));
+    }
+    eloss_left -= m_necessary_energy;
+    ekin -= m_necessary_energy;
+    if (ekin < 0.) break;
+    // Generate next random energy
+#ifdef USE_ADJUSTED_W
+    m_necessary_energy = eV * pairprod->get_eloss(ekin / eV);
+#else
+    m_necessary_energy = pairprod->get_eloss() * eV;
+#endif
+    if (m_print_listing) {
+      Iprintnf(mcout, eloss_left / eV);
+      Iprint2nf(mcout, ekin / eV, m_necessary_energy / eV);
+    }
+  }
+  m_necessary_energy -= eloss_left;
+  if (m_print_listing) Iprintnf(mcout, m_necessary_energy / eV);
 }
 
 void HeedDeltaElectron::print(std::ostream& file, int l) const {
-  if (l >= 0) {
-    Ifile << "HeedDeltaElectron (l=" << l
-          << "): particle_number=" << particle_number << "\n";
-    if (l == 1) return;
-    indn.n += 2;
-    Ifile << "s_low_mult_scattering=" << s_low_mult_scattering
-          << " s_high_mult_scattering=" << s_high_mult_scattering << '\n';
-    Ifile << "phys_mrange=" << phys_mrange << " s_stop_eloss=" << s_stop_eloss
-          << " s_mult_low_path_length=" << s_mult_low_path_length << '\n';
-    Ifile << "q_low_path_length=" << q_low_path_length
-          << " s_path_length=" << s_path_length
-          << " necessary_energy/eV=" << necessary_energy / eV << '\n';
-    Ifile << " parent_particle_number=" << parent_particle_number << '\n';
-
-    mparticle::print(file, l - 1);
-    indn.n -= 2;
-  }
+  if (l < 0) return;
+  file << "HeedDeltaElectron: particle_number=" << m_particle_number << "\n";
+  if (l <= 1) return;
+  file << " s_low_mult_scattering=" << s_low_mult_scattering
+       << " s_high_mult_scattering=" << s_high_mult_scattering << '\n'
+       << " phys_mrange=" << m_phys_mrange 
+       << " stop_eloss=" << m_stop_eloss
+       << " mult_low_path_length=" << m_mult_low_path_length << '\n'
+       << " q_low_path_length=" << m_q_low_path_length
+       << " path_length=" << m_path_length
+       << " necessary_energy/eV=" << m_necessary_energy / eV << '\n'
+       << " parent_particle_number=" << parent_particle_number << '\n';
+  mparticle::print(file, l - 1);
 }
-
 }

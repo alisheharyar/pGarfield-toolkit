@@ -2,81 +2,67 @@
 #include <cmath>
 #include <cfloat>
 #include <climits>
+
+#include "wcpplib/util/FunNameStack.h"
 #include "wcpplib/random/ranluxint.h"
 #include "heed++/code/PairProd.h"
-/*
-2003, I. Smirnov
-*/
+
+// 2003, I. Smirnov
+
 //#define USE_GET_ELOSS_CUT
-#ifdef USE_GET_ELOSS_CUT
-const double w_cut_ratio = 0.2;
-#else
-const double V_ratio = 0.5;
-#endif
 
 namespace Heed {
 
-PairProd::PairProd(const String& file_name, double fwa, double ffactorFano)
-    : wa(fwa), factorFano(ffactorFano) {
-  mfunnamep("PairProd::PairProd(const String& file_name, double fwa, double "
-            "ffactorFano)");
+PairProd::PairProd(const std::string& file_name, double fw, double ffano)
+    : m_w(fw), m_f(ffano) {
+  mfunnamep("PairProd::PairProd(const std::string&, double, double)");
 
-#ifdef USE_STLSTRING
   std::ifstream file(file_name.c_str());
-#else
-  std::ifstream file(file_name);
-#endif
   if (!file) {
     funnw.ehdr(mcerr);
     mcerr << "cannot open file " << file_name << std::endl;
     spexit(mcerr);
   }
   long q;
-  file >> wa_table >> I_table >> J_table >> factorFano_table >> q;
+  file >> m_wtable >> m_i >> m_j >> m_ftable >> q;
   if (!file.good()) {
     funnw.ehdr(mcerr);
     mcerr << "error at reading file" << std::endl;
     spexit(mcerr);
   }
-  DynLinArr<double> xx(q);
-  DynLinArr<double> yy(q);
-  for (long n = 0; n < q; n++) {
-    file >> xx[n] >> yy[n];
-  }
-  pran = PointsRan(xx, yy, I_table, J_table);
-  k = sqrt(factorFano * wa * wa / (factorFano_table * wa_table * wa_table));
-  s = wa - k * wa_table;
-  //s = wa - wa / factorFano * ( 2.0 * factorFano - factorFano_table);
-  //k = wa / (factorFano * wa_table) * ( 2.0 * factorFano - factorFano_table);
+  std::vector<double> xx(q);
+  std::vector<double> yy(q);
+  for (long n = 0; n < q; n++) file >> xx[n] >> yy[n];
+  pran = PointsRan(xx, yy, m_i, m_j);
+  m_k = sqrt(m_f * m_w * m_w / (m_ftable * m_wtable * m_wtable));
+  m_s = m_w - m_k * m_wtable;
+  // m_s = m_w - m_w / m_f * (2. * m_f - m_ftable);
+  // m_k = m_w / (m_f * m_wtable) * (2. * m_f - m_ftable);
 }
 
-double PairProd::get_eloss(void) const {
-  mfunname("double PairProd::get_eloss(void) const");
-  const double e_loss = k * pran.ran(SRANLUX()) + s;
-  return e_loss;
+double PairProd::get_eloss() const {
+  mfunname("double PairProd::get_eloss() const");
+  return m_k * pran.ran(SRANLUX()) + m_s;
 }
 
 #ifdef USE_GET_ELOSS_CUT
 
 double PairProd::get_eloss(const double e_cur) const {
-  mfunname("double PairProd::get_eloss(double ecur) const");
-  double e_loss = k * pran.ran(SRANLUX()) + s;
-  if (e_cur - e_loss < w_cut_ratio * wa) e_loss = 1.0e20;  // to stop tracing
-  return e_loss;
+  mfunname("double PairProd::get_eloss(const double ecur) const");
+  const double e_loss = m_k * pran.ran(SRANLUX()) + m_s;
+  constexpr double w_cut_ratio = 0.2;
+  return e_cur - e_loss < w_cut_ratio * m_w ? 1.0e20 : eloss;
 }
 
 #else
 
 double PairProd::get_eloss(const double e_cur) const {
-  mfunname("double PairProd::get_eloss(double ecur) const");
-  double e_loss = k * pran.ran(SRANLUX()) + s;
-  double c;
-  if (e_cur <= V_ratio * wa) {
-    c = DBL_MAX;
-  } else {
-    //c = 1.0 / (1.0 - V_ratio * wa / e_cur);
-    c = 1.0 / (1.0 - pow(V_ratio * wa / e_cur, 2.0));
-  }
+  mfunname("double PairProd::get_eloss(const double ecur) const");
+  const double e_loss = m_k * pran.ran(SRANLUX()) + m_s;
+  constexpr double V_ratio = 0.5;
+  const double v = V_ratio * m_w / e_cur; 
+  // const double c = 1. / (1. - v);
+  const double c = v < 1. ? 1. / (1. - v * v) : DBL_MAX;
   return e_loss * c;
 }
 
@@ -86,13 +72,10 @@ void PairProd::print(std::ostream& file, int l) const {
   if (l <= 0) return;
   Ifile << "PairProd:\n";
   indn.n += 2;
-  Ifile << "wa=" << wa << " factorFano=" << factorFano << '\n';
-  Ifile << "wa_table=" << wa_table << " factorFano_table=" << factorFano_table
-        << '\n';
-  Ifile << " I_table=" << I_table << " J_table=" << J_table << " k=" << k
-        << " s=" << s << '\n';
+  Ifile << "W=" << m_w << " Fano factor=" << m_f << '\n';
+  Ifile << "W table=" << m_wtable << " Fano factor table=" << m_ftable << '\n';
+  Ifile << "I=" << m_i << " J=" << m_j << " k=" << m_k << " s=" << m_s << '\n';
   pran.print(file);
   indn.n -= 2;
 }
-
 }

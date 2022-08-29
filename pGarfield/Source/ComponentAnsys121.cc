@@ -1,50 +1,41 @@
-#include <stdio.h>
-#include <string.h>
-#include <iostream>
-#include <fstream>
-#include <stdlib.h>
 #include <math.h>
+#include <stdlib.h>
+#include <fstream>
+#include <iostream>
 
-#include "ComponentAnsys121.hh"
+#include "Garfield/ComponentAnsys121.hh"
 
 namespace Garfield {
 
-ComponentAnsys121::ComponentAnsys121() : ComponentFieldMap() {
-
-  m_className = "ComponentAnsys121";
-  ready = false;
+ComponentAnsys121::ComponentAnsys121() : ComponentFieldMap("Ansys121") {
+  m_is3d = false;
+  m_elementType = ElementType::Serendipity;
   // Default bounding box
-  is3d = false;
-  zMinBoundingBox = -50;
-  zMaxBoundingBox = 50;
+  m_minBoundingBox[2] = -50;
+  m_maxBoundingBox[2] = 50;
 }
 
 bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
                                    std::string mplist, std::string prnsol,
                                    std::string unit) {
-
-  ready = false;
+  Reset();
   // Keep track of the success.
   bool ok = true;
 
   // Buffer for reading
-  const int size = 100;
+  constexpr int size = 100;
   char line[size];
 
   // Open the material list.
-  std::ifstream fmplist;
-  fmplist.open(mplist.c_str(), std::ios::in);
-  if (fmplist.fail()) {
-    std::cerr << m_className << "::Initialise:\n";
-    std::cerr << "    Could not open material file " << mplist
-              << " for reading.\n",
-        std::cerr << "    The file perhaps does not exist.\n";
+  std::ifstream fmplist(mplist);
+  if (!fmplist) {
+    PrintCouldNotOpen("Initialise", mplist);
     return false;
   }
 
   // Read the material list.
-  nMaterials = 0;
-  int il = 0, icurrmat = -1;
+  int il = 0;
+  unsigned int icurrmat = 0;
   bool readerror = false;
   while (fmplist.getline(line, size, '\n')) {
     il++;
@@ -70,45 +61,43 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
         strcmp(token, "TEMPERATURE") == 0 || strcmp(token, "PROPERTY=") == 0 ||
         int(token[0]) == 10 || int(token[0]) == 13)
       continue;
-    // Read number of materials,
-    // ensure it does not exceed the maximum and initialise the list
+    // Read number of materials and initialise the list.
     if (strcmp(token, "LIST") == 0) {
       token = strtok(NULL, " ");
       token = strtok(NULL, " ");
       token = strtok(NULL, " ");
       token = strtok(NULL, " ");
-      nMaterials = ReadInteger(token, -1, readerror);
+      const unsigned int nMaterials = ReadInteger(token, -1, readerror);
       if (readerror) {
         std::cerr << m_className << "::Initialise:\n";
         std::cerr << "    Error reading file " << mplist << " (line " << il
                   << ").\n";
         fmplist.close();
-        ok = false;
         return false;
       }
-      materials.resize(nMaterials);
-      for (int i = 0; i < nMaterials; ++i) {
-        materials[i].ohm = -1;
-        materials[i].eps = -1;
-        materials[i].medium = NULL;
+      m_materials.resize(nMaterials);
+      for (auto& material : m_materials) {
+        material.ohm = -1;
+        material.eps = -1;
+        material.medium = nullptr;
       }
-      if (debug) {
-        std::cout << m_className << "::Initialise:\n";
-        std::cout << "    Number of materials: " << nMaterials << "\n";
+      if (m_debug) {
+        std::cout << m_className << "::Initialise: " << nMaterials
+                  << " materials.\n";
       }
     } else if (strcmp(token, "MATERIAL") == 0) {
       // Version 12 format: read material number
       token = strtok(NULL, " ");
       token = strtok(NULL, " ");
-      icurrmat = ReadInteger(token, -1, readerror);
-      if (readerror) {
+      const int imat = ReadInteger(token, -1, readerror);
+      if (readerror || imat < 0) {
         std::cerr << m_className << "::Initialise:\n";
         std::cerr << "    Error reading file " << mplist << " (line " << il
                   << ").\n";
         fmplist.close();
-        ok = false;
         return false;
       }
+      icurrmat = imat;
     } else if (strcmp(token, "TEMP") == 0) {
       // Version 12 format: read property tag and value
       token = strtok(NULL, " ");
@@ -118,10 +107,9 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
       } else if (strncmp(token, "RSVX", 4) == 0) {
         itype = 2;
       } else {
-        std::cerr << m_className << "::Initialise:\n";
-        std::cerr << "    Found unknown material property flag " << token
-                  << "\n";
-        std::cerr << "    on material properties file " << mplist << " (line "
+        std::cerr << m_className << "::Initialise:\n"
+                  << "    Unknown material property flag " << token << "\n"
+                  << "    in material properties file " << mplist << " (line "
                   << il << ").\n";
         ok = false;
       }
@@ -129,7 +117,7 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
       il++;
       token = NULL;
       token = strtok(line, " ");
-      if (icurrmat < 1 || icurrmat > nMaterials) {
+      if (icurrmat < 1 || icurrmat > m_materials.size()) {
         std::cerr << m_className << "::Initialise:\n";
         std::cerr << "    Found out-of-range current material index "
                   << icurrmat << "\n";
@@ -137,16 +125,15 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
         ok = false;
         readerror = false;
       } else if (itype == 1) {
-        materials[icurrmat - 1].eps = ReadDouble(token, -1, readerror);
+        m_materials[icurrmat - 1].eps = ReadDouble(token, -1, readerror);
       } else if (itype == 2) {
-        materials[icurrmat - 1].ohm = ReadDouble(token, -1, readerror);
+        m_materials[icurrmat - 1].ohm = ReadDouble(token, -1, readerror);
       }
       if (readerror) {
         std::cerr << m_className << "::Initialise:\n";
         std::cerr << "    Error reading file " << mplist << " (line " << il
                   << ").\n";
         fmplist.close();
-        ok = false;
         return false;
       }
     } else if (strcmp(token, "PROPERTY") == 0) {
@@ -159,11 +146,9 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
       } else if (strcmp(token, "RSVX") == 0) {
         itype = 2;
       } else {
-        std::cerr << m_className << "::Initialise:\n";
-        std::cerr << m_className << "::Initialise:\n";
-        std::cerr << "    Found unknown material property flag " << token
-                  << "\n";
-        std::cerr << "    on material properties file " << mplist << " (line "
+        std::cerr << m_className << "::Initialise:\n"
+                  << "    Unknown material property flag " << token << "\n"
+                  << "    in material properties file " << mplist << " (line "
                   << il << ").\n";
         ok = false;
       }
@@ -175,9 +160,8 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
         std::cerr << "    Error reading file " << mplist << " (line " << il
                   << ").\n";
         fmplist.close();
-        ok = false;
         return false;
-      } else if (imat < 1 || imat > nMaterials) {
+      } else if (imat < 1 || imat > (int)m_materials.size()) {
         std::cerr << m_className << "::Initialise:\n";
         std::cerr << "    Found out-of-range current material index " << imat
                   << "\n";
@@ -192,83 +176,54 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
         token = strtok(line, " ");
         token = strtok(NULL, " ");
         if (itype == 1) {
-          materials[imat - 1].eps = ReadDouble(token, -1, readerror);
+          m_materials[imat - 1].eps = ReadDouble(token, -1, readerror);
         } else if (itype == 2) {
-          materials[imat - 1].ohm = ReadDouble(token, -1, readerror);
+          m_materials[imat - 1].ohm = ReadDouble(token, -1, readerror);
         }
         if (readerror) {
           std::cerr << m_className << "::Initialise:\n";
           std::cerr << "    Error reading file " << mplist << " (line " << il
                     << ").\n";
           fmplist.close();
-          ok = false;
           return false;
         }
       }
     }
   }
-
   // Close the file
   fmplist.close();
 
-  // Find the lowest epsilon, check for eps = 0, set default drift media
-  double epsmin = -1;
-  int iepsmin = -1;
-  for (int imat = 0; imat < nMaterials; ++imat) {
-    if (materials[imat].eps < 0) continue;
-    if (materials[imat].eps == 0) {
-      std::cerr << m_className << "::Initialise:\n";
-      std::cerr << "    Material " << imat
-                << " has been assigned a permittivity\n";
-      std::cerr << "    equal to zero in " << mplist << ".\n";
-      ok = false;
-    } else if (iepsmin < 0 || epsmin > materials[imat].eps) {
-      epsmin = materials[imat].eps;
-      iepsmin = imat;
-    }
-  }
-
-  if (iepsmin < 0) {
-    std::cerr << m_className << "::Initialise:\n";
-    std::cerr << "    No material with positive permittivity found \n";
-    std::cerr << "    in material list " << mplist << ".\n";
-    ok = false;
-  } else {
-    for (int imat = 0; imat < nMaterials; ++imat) {
-      if (imat == iepsmin) {
-        materials[imat].driftmedium = true;
-      } else {
-        materials[imat].driftmedium = false;
-      }
-    }
-  }
+  // Find lowest epsilon, check for eps = 0, set default drift medium.
+  if (!SetDefaultDriftMedium()) ok = false;
 
   // Tell how many lines read
-  std::cout << m_className << "::Initialise:\n";
-  std::cout << "    Read properties of " << nMaterials
+  std::cout << m_className << "::Initialise:\n"
+            << "    Read properties of " << m_materials.size()
             << " materials from file " << mplist << ".\n";
-  if (debug) PrintMaterials();
+  if (m_debug) PrintMaterials();
 
   // Open the element list
-  std::ifstream felist;
-  felist.open(elist.c_str(), std::ios::in);
-  if (felist.fail()) {
-    std::cerr << m_className << "::Initialise:\n";
-    std::cerr << "    Could not open element file " << elist
-              << " for reading.\n";
-    std::cerr << "    The file perhaps does not exist.\n";
+  std::ifstream felist(elist);
+  if (!felist) {
+    PrintCouldNotOpen("Initialise", elist);
     return false;
   }
   // Read the element list
-  elements.clear();
-  nElements = 0;
-  element newElement;
+  m_elements.clear();
   int ndegenerate = 0;
   int nbackground = 0;
   il = 0;
   int highestnode = 0;
   while (felist.getline(line, size, '\n')) {
     il++;
+    // Skip page feed in batch page title
+    if (strstr(line,"VERSION") != NULL) {
+      felist.getline(line, size, '\n');
+      il++;
+      felist.getline(line, size, '\n');
+      il++;
+      continue;
+    }
     // Split the line in tokens
     char* token = NULL;
     // Split into tokens
@@ -276,8 +231,11 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
     // Skip blank lines and headers
     if (!token || strcmp(token, " ") == 0 || strcmp(token, "\n") == 0 ||
         int(token[0]) == 10 || int(token[0]) == 13 ||
-        strcmp(token, "LIST") == 0 || strcmp(token, "ELEM") == 0)
+        strcmp(token, "LIST") == 0 || strcmp(token, "ELEM") == 0 ||
+        strcmp(token, "ANSYS") == 0 || strcmp(token, "***") == 0 ||
+        strcmp(token, "VERSION") == 0) {
       continue;
+    }
     // Read the element
     int ielem = ReadInteger(token, -1, readerror);
     token = strtok(NULL, " ");
@@ -310,20 +268,20 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
       std::cerr << "    Error reading file " << elist << " (line " << il
                 << ").\n";
       felist.close();
-      ok = false;
       return false;
-    } else if (ielem - 1 != nElements + nbackground) {
+    } else if (ielem - 1 != (int)m_elements.size() + nbackground) {
       std::cerr << m_className << "::Initialise:\n";
       std::cerr << "    Synchronisation lost on file " << elist << " (line "
                 << il << ").\n";
-      std::cerr << "    Element: " << ielem << " (expected " << nElements
-                << "), material: " << imat << ", nodes: (" << in0 << ", " << in1
+      std::cerr << "    Element: " << ielem << " (expected " 
+                << m_elements.size() << "), material: " << imat 
+                << ", nodes: (" << in0 << ", " << in1
                 << ", " << in2 << ", " << in3 << ", " << in4 << ", " << in5
                 << ", " << in6 << ", " << in7 << ")\n";
       ok = false;
     }
     // Check the material number and ensure that epsilon is non-negative
-    if (imat < 1 || imat > nMaterials) {
+    if (imat < 1 || imat > (int)m_materials.size()) {
       std::cerr << m_className << "::Initialise:\n";
       std::cerr << "   Out-of-range material number on file " << elist
                 << " (line " << il << ").\n";
@@ -333,11 +291,11 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
                 << in7 << ")\n";
       ok = false;
     }
-    if (materials[imat - 1].eps < 0) {
+    if (m_materials[imat - 1].eps < 0) {
       std::cerr << m_className << "::Initialise:\n";
       std::cerr << "    Element " << ielem << " in element list " << elist
-                << " uses material " << imat << " which\n",
-          std::cerr << "    has not been assigned a positive permittivity\n";
+                << " uses material " << imat << " which\n"
+                << "    has not been assigned a positive permittivity\n";
       std::cerr << "    in material list " << mplist << ".\n";
       ok = false;
     }
@@ -359,11 +317,12 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
     if (in6 > highestnode) highestnode = in6;
     if (in7 > highestnode) highestnode = in7;
     // Skip quadrilaterals which are background.
-    if (deleteBackground && materials[imat - 1].ohm == 0) {
+    if (m_deleteBackground && m_materials[imat - 1].ohm == 0) {
       nbackground++;
       continue;
     }
     // Store the element, degeneracy
+    Element newElement;
     if (in2 == in3 && in3 == in6) {
       ndegenerate++;
       newElement.degenerate = true;
@@ -392,69 +351,69 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
       newElement.emap[6] = in6 - 1;
       newElement.emap[7] = in7 - 1;
     }
-    elements.push_back(newElement);
-    ++nElements;
+    m_elements.push_back(std::move(newElement));
   }
   // Close the file
   felist.close();
+
+  if (m_elements.empty()) {
+    std::cerr << m_className << "::Initialise:\n"
+              << "    Found no valid elements in file " << elist << ".\n";
+    return false;
+  } 
+
   // Tell how many lines read
-  std::cout << m_className << "::Initialise:\n";
-  std::cout << "    Read " << nElements << " elements from file " << elist
-            << ",\n";
+  std::cout << m_className << "::Initialise:\n"
+            << "    Read " << m_elements.size() << " elements from file "
+            << elist << ",\n";
   std::cout << "    highest node number: " << highestnode << ",\n";
   std::cout << "    degenerate elements: " << ndegenerate << ",\n";
   std::cout << "    background elements skipped: " << nbackground << ".\n";
   // Check the value of the unit
-  double funit;
-  if (strcmp(unit.c_str(), "mum") == 0 || strcmp(unit.c_str(), "micron") == 0 ||
-      strcmp(unit.c_str(), "micrometer") == 0) {
-    funit = 0.0001;
-  } else if (strcmp(unit.c_str(), "mm") == 0 ||
-             strcmp(unit.c_str(), "millimeter") == 0) {
-    funit = 0.1;
-  } else if (strcmp(unit.c_str(), "cm") == 0 ||
-             strcmp(unit.c_str(), "centimeter") == 0) {
-    funit = 1.0;
-  } else if (strcmp(unit.c_str(), "m") == 0 ||
-             strcmp(unit.c_str(), "meter") == 0) {
-    funit = 100.0;
-  } else {
-    std::cerr << m_className << "::Initialise:\n";
-    std::cerr << "    Unknown length unit " << unit << ".\n";
+  double funit = ScalingFactor(unit);
+  if (funit <= 0.) {
+    std::cerr << m_className << "::Initialise:\n"
+              << "    Unknown length unit " << unit << ".\n";
     ok = false;
     funit = 1.0;
   }
-  if (debug) {
-    std::cout << m_className << "::Initialise:\n";
-    std::cout << "    Unit scaling factor = " << funit << ".\n";
+  if (m_debug) {
+    std::cout << m_className << "::Initialise: Unit scaling factor = "
+              << funit << ".\n";
   }
 
   // Open the node list
-  std::ifstream fnlist;
-  fnlist.open(nlist.c_str(), std::ios::in);
-  if (fnlist.fail()) {
-    std::cerr << m_className << "::Initialise:\n";
-    std::cerr << "    Could not open nodes file " << nlist << " for reading.\n";
-    std::cerr << "    The file perhaps does not exist.\n";
+  std::ifstream fnlist(nlist);
+  if (!fnlist) {
+    PrintCouldNotOpen("Initialise", nlist);
     return false;
   }
   // Read the node list
-  nodes.clear();
-  nNodes = 0;
-  node newNode;
-  newNode.w.clear();
+  m_nodes.clear();
   il = 0;
   while (fnlist.getline(line, size, '\n')) {
     il++;
-    // Split the line in tokens
+    // Skip page feed in batch page title
+    if (strstr(line,"VERSION") != NULL) {
+      fnlist.getline(line, size, '\n');
+      il++;
+      fnlist.getline(line, size, '\n');
+      il++;
+      continue;
+    }
+     // Split the line in tokens
     char* token = NULL;
     // Split into tokens
     token = strtok(line, " ");
     // Skip blank lines and headers
     if (!token || strcmp(token, " ") == 0 || strcmp(token, "\n") == 0 ||
         int(token[0]) == 10 || int(token[0]) == 13 ||
-        strcmp(token, "LIST") == 0 || strcmp(token, "NODE") == 0)
+        strcmp(token, "LIST") == 0 || strcmp(token, "NODE") == 0 ||
+        strcmp(token, "ANSYS") == 0 || strcmp(token, "***") == 0 ||
+        strcmp(token, "FILE") == 0 || strcmp(token, "Electric") == 0 ||
+        strcmp(token, "VERSION") == 0) {
       continue;
+    }
     // Read the element
     int inode = ReadInteger(token, -1, readerror);
     token = strtok(NULL, " ");
@@ -469,68 +428,74 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
       std::cerr << "    Error reading file " << nlist << " (line " << il
                 << ").\n";
       fnlist.close();
-      ok = false;
       return false;
     }
     // Check synchronisation
-    if (inode - 1 != nNodes) {
+    if (inode - 1 != (int)m_nodes.size()) {
       std::cerr << m_className << "::Initialise:\n";
       std::cerr << "    Synchronisation lost on file " << nlist << " (line "
                 << il << ").\n";
-      std::cerr << "    Node: " << inode << " (expected " << nNodes
+      std::cerr << "    Node: " << inode << " (expected " << m_nodes.size()
                 << "), (x,y,z) = (" << xnode << ", " << ynode << ", " << znode
                 << ")\n";
       ok = false;
     }
-
+    Node newNode;
+    newNode.w.clear();
     // Store the point coordinates
     newNode.x = xnode * funit;
     newNode.y = ynode * funit;
     newNode.z = znode * funit;
-    nodes.push_back(newNode);
-    ++nNodes;
+    m_nodes.push_back(std::move(newNode));
   }
   // Close the file
   fnlist.close();
   // Tell how many lines read
-  std::cout << m_className << "::Initialise:\n";
-  std::cout << "    Read " << nNodes << " nodes from file " << nlist << ".\n";
+  std::cout << m_className << "::Initialise:\n"
+            << "    Read " << m_nodes.size() << " nodes.\n";
   // Check number of nodes
-  if (nNodes != highestnode) {
+  if ((int)m_nodes.size() != highestnode) {
     std::cerr << m_className << "::Initialise:\n";
-    std::cerr << "    Number of nodes read (" << nNodes << ") on " << nlist
-              << "\n";
-    std::cerr << "    does not match element list (" << highestnode << ").\n";
+    std::cerr << "    Number of nodes read (" << m_nodes.size() 
+              << ") on " << nlist << "\n"
+              << "    does not match element list (" << highestnode << ").\n";
     ok = false;
   }
 
   // Open the voltage list
-  std::ifstream fprnsol;
-  fprnsol.open(prnsol.c_str(), std::ios::in);
-  if (fprnsol.fail()) {
-    std::cerr << m_className << "::Initialise:\n";
-    std::cerr << "    Could not open potential file " << prnsol
-              << " for reading.\n";
-    std::cerr << "    The file perhaps does not exist.\n";
+  std::ifstream fprnsol(prnsol);
+  if (!fprnsol) {
+    PrintCouldNotOpen("Initialise", prnsol);
     return false;
   }
   // Read the voltage list
   il = 0;
-  int nread = 0;
+  unsigned int nread = 0;
   readerror = false;
   while (fprnsol.getline(line, size, '\n')) {
     il++;
+    // Skip page feed in batch page title
+    if (strstr(line,"VERSION") != NULL) {
+      fprnsol.getline(line, size, '\n');
+      il++;
+      fprnsol.getline(line, size, '\n');
+      il++;
+      continue;
+    }
     // Split the line in tokens
     char* token = NULL;
     token = strtok(line, " ");
     // Skip blank lines and headers
     if (!token || strcmp(token, " ") == 0 || strcmp(token, "\n") == 0 ||
         int(token[0]) == 10 || int(token[0]) == 13 ||
-        strcmp(token, "PRINT") == 0 || strcmp(token, "*****") == 0 ||
-        strcmp(token, "LOAD") == 0 || strcmp(token, "TIME=") == 0 ||
-        strcmp(token, "MAXIMUM") == 0 || strcmp(token, "VALUE") == 0 ||
-        strcmp(token, "NODE") == 0)
+        strcmp(token, "PRINT") == 0 || strcmp(token, "ANSYS") == 0 || 
+        strcmp(token, "VERSION") == 0 || strcmp(token, "NODAL") == 0 || 
+        strcmp(token, "FILE") == 0 || strcmp(token, "*****") == 0 ||
+        strcmp(token, "***") == 0 || strcmp(token, "LOAD") == 0 ||
+        strcmp(token, "TIME=") == 0 || strcmp(token, "MAXIMUM") == 0 ||
+        strcmp(token, "VALUE") == 0 || strcmp(token, "NODE") == 0) {
       continue;
+    }
     // Read the element
     int inode = ReadInteger(token, -1, readerror);
     token = strtok(NULL, " ");
@@ -541,18 +506,17 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
       std::cerr << "    Error reading file " << prnsol << " (line " << il
                 << ").\n";
       fprnsol.close();
-      ok = false;
       return false;
     }
     // Check node number and store if OK
-    if (inode < 1 || inode > nNodes) {
+    if (inode < 1 || inode > (int)m_nodes.size()) {
       std::cerr << m_className << "::Initialise:\n";
       std::cerr << "    Node number " << inode << " out of range\n";
       std::cerr << "    on potential file " << prnsol << " (line " << il
                 << ").\n";
       ok = false;
     } else {
-      nodes[inode - 1].v = volt;
+      m_nodes[inode - 1].v = volt;
       nread++;
     }
   }
@@ -563,16 +527,16 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
   std::cout << "    Read " << nread << " potentials from file " << prnsol
             << ".\n";
   // Check number of nodes
-  if (nread != nNodes) {
+  if (nread != m_nodes.size()) {
     std::cerr << m_className << "::Initialise:\n";
     std::cerr << "    Number of nodes read (" << nread << ") on potential file "
-              << prnsol << " does not\n",
-        std::cerr << "    match the node list (" << nNodes << ").\n";
+              << prnsol << " does not\n"
+              << "    match the node list (" << m_nodes.size() << ").\n";
     ok = false;
   }
   // Set the ready flag
   if (ok) {
-    ready = true;
+    m_ready = true;
   } else {
     std::cerr << m_className << "::Initialise:\n";
     std::cerr
@@ -580,71 +544,51 @@ bool ComponentAnsys121::Initialise(std::string elist, std::string nlist,
     return false;
   }
 
-  // Remove weighting fields (if any).
-  wfields.clear();
-  wfieldsOk.clear();
-  nWeightingFields = 0;
-
-  // Establish the ranges
-  SetRange();
-  UpdatePeriodicity();
+  Prepare();
   return true;
 }
 
 bool ComponentAnsys121::SetWeightingField(std::string prnsol,
                                           std::string label) {
-
-  if (!ready) {
-    std::cerr << m_className << "::SetWeightingField:\n";
-    std::cerr << "    No valid field map is present.\n";
+  if (!m_ready) {
+    PrintNotReady("SetWeightingField");
     std::cerr << "    Weighting field cannot be added.\n";
     return false;
   }
 
   // Open the voltage list.
-  std::ifstream fprnsol;
-  fprnsol.open(prnsol.c_str(), std::ios::in);
-  if (fprnsol.fail()) {
-    std::cerr << m_className << "::SetWeightingField:\n";
-    std::cerr << "    Could not open potential file " << prnsol
-              << " for reading.\n";
-    std::cerr << "    The file perhaps does not exist.\n";
+  std::ifstream fprnsol(prnsol);
+  if (!fprnsol) {
+    PrintCouldNotOpen("SetWeightingField", prnsol);
     return false;
   }
 
   // Check if a weighting field with the same label already exists.
-  int iw = nWeightingFields;
-  for (int i = nWeightingFields; i--;) {
-    if (wfields[i] == label) {
-      iw = i;
-      break;
-    }
+  const size_t iw = GetOrCreateWeightingFieldIndex(label);
+  if (iw + 1 != m_wfields.size()) {
+    std::cout << m_className << "::SetWeightingField:\n"
+              << "    Replacing existing weighting field " << label << ".\n";
   }
-  if (iw == nWeightingFields) {
-    ++nWeightingFields;
-    wfields.resize(nWeightingFields);
-    wfieldsOk.resize(nWeightingFields);
-    for (int j = nNodes; j--;) {
-      nodes[j].w.resize(nWeightingFields);
-    }
-  } else {
-    std::cout << m_className << "::SetWeightingField:\n";
-    std::cout << "    Replacing existing weighting field " << label << ".\n";
-  }
-  wfields[iw] = label;
-  wfieldsOk[iw] = false;
 
   // Buffer for reading
-  const int size = 100;
+  constexpr int size = 100;
   char line[size];
 
   bool ok = true;
   // Read the voltage list.
   int il = 0;
-  int nread = 0;
+  unsigned int nread = 0;
   bool readerror = false;
   while (fprnsol.getline(line, size, '\n')) {
     il++;
+    // Skip page feed in batch page title
+    if (strstr(line,"VERSION") != NULL) {
+      fprnsol.getline(line, size, '\n');
+      il++;
+      fprnsol.getline(line, size, '\n');
+      il++;
+      continue;
+    }
     // Split the line in tokens.
     char* token = NULL;
     token = strtok(line, " ");
@@ -669,14 +613,14 @@ bool ComponentAnsys121::SetWeightingField(std::string prnsol,
       return false;
     }
     // Check node number and store if OK.
-    if (inode < 1 || inode > nNodes) {
+    if (inode < 1 || inode > (int)m_nodes.size()) {
       std::cerr << m_className << "::SetWeightingField:\n";
       std::cerr << "    Node number " << inode << " out of range\n";
       std::cerr << "    on potential file " << prnsol << " (line " << il
                 << ").\n";
       ok = false;
     } else {
-      nodes[inode - 1].w[iw] = volt;
+      m_nodes[inode - 1].w[iw] = volt;
       nread++;
     }
   }
@@ -687,16 +631,16 @@ bool ComponentAnsys121::SetWeightingField(std::string prnsol,
   std::cout << "    Read " << nread << " potentials from file " << prnsol
             << ".\n";
   // Check the number of nodes.
-  if (nread != nNodes) {
-    std::cerr << m_className << "::SetWeightingField:\n";
-    std::cerr << "    Number of nodes read (" << nread << ") "
-              << "    on potential file " << prnsol << "\n";
-    std::cerr << "    does not match the node list (" << nNodes << ").\n";
+  if (nread != m_nodes.size()) {
+    std::cerr << m_className << "::SetWeightingField:\n"
+              << "    Number of nodes read from potential file " << prnsol
+              << " (" << nread << ")\n    does not match the node list (" 
+              << m_nodes.size() << ").\n";
     ok = false;
   }
 
   // Set the ready flag.
-  wfieldsOk[iw] = ok;
+  m_wfieldsOk[iw] = ok;
   if (!ok) {
     std::cerr << m_className << "::SetWeightingField:\n";
     std::cerr << "    Field map could not be read "
@@ -706,557 +650,13 @@ bool ComponentAnsys121::SetWeightingField(std::string prnsol,
   return true;
 }
 
-void ComponentAnsys121::ElectricField(const double x, const double y,
-                                      const double z, double& ex, double& ey,
-                                      double& ez, Medium*& m, int& status) {
-
-  double v;
-  ElectricField(x, y, z, ex, ey, ez, v, m, status);
-}
-
-void ComponentAnsys121::ElectricField(const double xin, const double yin,
-                                      const double zin, double& ex, double& ey,
-                                      double& ez, double& volt, Medium*& m,
-                                      int& status) {
-
-  // Copy the coordinates
-  double x = xin, y = yin, z = 0.;
-
-  // Map the coordinates onto field map coordinates
-  bool xmirrored, ymirrored, zmirrored;
-  double rcoordinate, rotation;
-  MapCoordinates(x, y, z, xmirrored, ymirrored, zmirrored, rcoordinate,
-                 rotation);
-
-  // Initial values
-  ex = ey = ez = volt = 0;
-  m = 0;
-  status = 0;
-
-  // Do not proceed if not properly initialised.
-  if (!ready) {
-    status = -10;
-    std::cerr << m_className << "::ElectricField:\n";
-    std::cerr << "     Field map not available for interpolation.\n";
-    return;
-  }
-
-  if (warning) {
-    std::cerr << m_className << "::ElectricField:\n";
-    std::cerr << "    Warnings have been issued for this field map.\n";
-  }
-
-  if (zin < zMinBoundingBox || zin > zMaxBoundingBox) {
-    status = -5;
-    return;
-  }
-
-  // Find the element that contains this point
-  double t1, t2, t3, t4, jac[4][4], det;
-  int imap = FindElement5(x, y, z, t1, t2, t3, t4, jac, det);
-  if (imap < 0) {
-    if (debug) {
-      std::cout << m_className << "::ElectricField:\n";
-      std::cout << "    Point (" << x << ", " << y << ") not in the mesh.\n";
-    }
-    status = -6;
-    return;
-  }
-
-  if (debug) {
-    std::cout << m_className << "::ElectricField:\n";
-    std::cout << "    Global: (" << x << ", " << y << "),\n";
-    std::cout << "    Local: (" << t1 << ", " << t2 << ", " << t3 << ", " << t4
-              << ") in element " << imap
-              << " (degenerate: " << elements[imap].degenerate << ")\n";
-    std::cout
-        << "                  Node             x            y            V\n";
-    for (int i = 0; i < 8; i++) {
-      printf("                  %-5d %12g %12g %12g\n", elements[imap].emap[i],
-             nodes[elements[imap].emap[i]].x, nodes[elements[imap].emap[i]].y,
-             nodes[elements[imap].emap[i]].v);
-    }
-  }
-
-  // Calculate quadrilateral field, which can degenerate to a triangular field
-  if (elements[imap].degenerate) {
-    volt = nodes[elements[imap].emap[0]].v * t1 * (2 * t1 - 1) +
-           nodes[elements[imap].emap[1]].v * t2 * (2 * t2 - 1) +
-           nodes[elements[imap].emap[2]].v * t3 * (2 * t3 - 1) +
-           4 * nodes[elements[imap].emap[3]].v * t1 * t2 +
-           4 * nodes[elements[imap].emap[4]].v * t1 * t3 +
-           4 * nodes[elements[imap].emap[5]].v * t2 * t3;
-    ex = -(nodes[elements[imap].emap[0]].v * (4 * t1 - 1) * jac[0][1] +
-           nodes[elements[imap].emap[1]].v * (4 * t2 - 1) * jac[1][1] +
-           nodes[elements[imap].emap[2]].v * (4 * t3 - 1) * jac[2][1] +
-           nodes[elements[imap].emap[3]].v *
-               (4 * t2 * jac[0][1] + 4 * t1 * jac[1][1]) +
-           nodes[elements[imap].emap[4]].v *
-               (4 * t3 * jac[0][1] + 4 * t1 * jac[2][1]) +
-           nodes[elements[imap].emap[5]].v *
-               (4 * t3 * jac[1][1] + 4 * t2 * jac[2][1])) /
-         det;
-    ey = -(nodes[elements[imap].emap[0]].v * (4 * t1 - 1) * jac[0][2] +
-           nodes[elements[imap].emap[1]].v * (4 * t2 - 1) * jac[1][2] +
-           nodes[elements[imap].emap[2]].v * (4 * t3 - 1) * jac[2][2] +
-           nodes[elements[imap].emap[3]].v *
-               (4 * t2 * jac[0][2] + 4 * t1 * jac[1][2]) +
-           nodes[elements[imap].emap[4]].v *
-               (4 * t3 * jac[0][2] + 4 * t1 * jac[2][2]) +
-           nodes[elements[imap].emap[5]].v *
-               (4 * t3 * jac[1][2] + 4 * t2 * jac[2][2])) /
-         det;
-  } else {
-    volt =
-        -nodes[elements[imap].emap[0]].v * (1 - t1) * (1 - t2) * (1 + t1 + t2) /
-            4 -
-        nodes[elements[imap].emap[1]].v * (1 + t1) * (1 - t2) * (1 - t1 + t2) /
-            4 -
-        nodes[elements[imap].emap[2]].v * (1 + t1) * (1 + t2) * (1 - t1 - t2) /
-            4 -
-        nodes[elements[imap].emap[3]].v * (1 - t1) * (1 + t2) * (1 + t1 - t2) /
-            4 +
-        nodes[elements[imap].emap[4]].v * (1 - t1) * (1 + t1) * (1 - t2) / 2 +
-        nodes[elements[imap].emap[5]].v * (1 + t1) * (1 + t2) * (1 - t2) / 2 +
-        nodes[elements[imap].emap[6]].v * (1 - t1) * (1 + t1) * (1 + t2) / 2 +
-        nodes[elements[imap].emap[7]].v * (1 - t1) * (1 + t2) * (1 - t2) / 2;
-    ex = -(nodes[elements[imap].emap[0]].v *
-               ((1 - t2) * (2 * t1 + t2) * jac[0][0] +
-                (1 - t1) * (t1 + 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[1]].v *
-               ((1 - t2) * (2 * t1 - t2) * jac[0][0] -
-                (1 + t1) * (t1 - 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[2]].v *
-               ((1 + t2) * (2 * t1 + t2) * jac[0][0] +
-                (1 + t1) * (t1 + 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[3]].v *
-               ((1 + t2) * (2 * t1 - t2) * jac[0][0] -
-                (1 - t1) * (t1 - 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[4]].v *
-               (t1 * (t2 - 1) * jac[0][0] +
-                (t1 - 1) * (t1 + 1) * jac[1][0] / 2) +
-           nodes[elements[imap].emap[5]].v *
-               ((1 - t2) * (1 + t2) * jac[0][0] / 2 -
-                (1 + t1) * t2 * jac[1][0]) +
-           nodes[elements[imap].emap[6]].v *
-               (-t1 * (1 + t2) * jac[0][0] +
-                (1 - t1) * (1 + t1) * jac[1][0] / 2) +
-           nodes[elements[imap].emap[7]].v *
-               ((t2 - 1) * (t2 + 1) * jac[0][0] / 2 +
-                (t1 - 1) * t2 * jac[1][0])) /
-         det;
-    ey = -(nodes[elements[imap].emap[0]].v *
-               ((1 - t2) * (2 * t1 + t2) * jac[0][1] +
-                (1 - t1) * (t1 + 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[1]].v *
-               ((1 - t2) * (2 * t1 - t2) * jac[0][1] -
-                (1 + t1) * (t1 - 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[2]].v *
-               ((1 + t2) * (2 * t1 + t2) * jac[0][1] +
-                (1 + t1) * (t1 + 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[3]].v *
-               ((1 + t2) * (2 * t1 - t2) * jac[0][1] -
-                (1 - t1) * (t1 - 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[4]].v *
-               (t1 * (t2 - 1) * jac[0][1] +
-                (t1 - 1) * (t1 + 1) * jac[1][1] / 2) +
-           nodes[elements[imap].emap[5]].v *
-               ((1 - t2) * (1 + t2) * jac[0][1] / 2 -
-                (1 + t1) * t2 * jac[1][1]) +
-           nodes[elements[imap].emap[6]].v *
-               (-t1 * (1 + t2) * jac[0][1] +
-                (1 - t1) * (1 + t1) * jac[1][1] / 2) +
-           nodes[elements[imap].emap[7]].v *
-               ((t2 - 1) * (t2 + 1) * jac[0][1] / 2 +
-                (t1 - 1) * t2 * jac[1][1])) /
-         det;
-  }
-
-  // Transform field to global coordinates
-  UnmapFields(ex, ey, ez, x, y, z, xmirrored, ymirrored, zmirrored, rcoordinate,
-              rotation);
-
-  // Drift medium?
-  if (debug) {
-    std::cout << m_className << "::ElectricField:\n";
-    std::cout << "    Material " << elements[imap].matmap << ", drift flag "
-              << materials[elements[imap].matmap].driftmedium << ".\n";
-  }
-  m = materials[elements[imap].matmap].medium;
-  status = -5;
-  if (materials[elements[imap].matmap].driftmedium) {
-    if (m != 0) {
-      if (m->IsDriftable()) status = 0;
-    }
-  }
-}
-
-void ComponentAnsys121::WeightingField(const double xin, const double yin,
-                                       const double zin, double& wx, double& wy,
-                                       double& wz, const std::string label) {
-
-  // Initial values
-  wx = wy = wz = 0;
-
-  // Do not proceed if not properly initialised.
-  if (!ready) return;
-
-  // Look for the label.
-  int iw = 0;
-  bool found = false;
-  for (int i = nWeightingFields; i--;) {
-    if (wfields[i] == label) {
-      iw = i;
-      found = true;
-      break;
-    }
-  }
-
-  // Do not proceed if the requested weighting field does not exist.
-  if (!found) return;
-  // Check if the weighting field is properly initialised.
-  if (!wfieldsOk[iw]) return;
-
-  // Copy the coordinates.
-  double x = xin, y = yin, z = zin;
-
-  // Map the coordinates onto field map coordinates
-  bool xmirrored, ymirrored, zmirrored;
-  double rcoordinate, rotation;
-  MapCoordinates(x, y, z, xmirrored, ymirrored, zmirrored, rcoordinate,
-                 rotation);
-
-  if (warning) {
-    std::cerr << m_className << "::WeightingField:\n";
-    std::cerr << "    Warnings have been issued for this field map.\n";
-  }
-
-  // Find the element that contains this point.
-  double t1, t2, t3, t4, jac[4][4], det;
-  int imap = FindElement5(x, y, z, t1, t2, t3, t4, jac, det);
-  // Check if the point is in the mesh.
-  if (imap < 0) return;
-
-  if (debug) {
-    std::cout << m_className << "::WeightingField:\n";
-    std::cout << "    Global: (" << x << ", " << y << "),\n";
-    std::cout << "    Local: (" << t1 << ", " << t2 << ", " << t3 << ", " << t4
-              << ") in element " << imap
-              << " (degenerate: " << elements[imap].degenerate << ")\n";
-    std::cout
-        << "                  Node             x            y            V\n";
-    for (int i = 0; i < 8; i++) {
-      printf("                  %-5d %12g %12g %12g\n", elements[imap].emap[i],
-             nodes[elements[imap].emap[i]].x, nodes[elements[imap].emap[i]].y,
-             nodes[elements[imap].emap[i]].w[iw]);
-    }
-  }
-
-  // Calculate quadrilateral field, which can degenerate to a triangular field
-  if (elements[imap].degenerate) {
-    wx = -(nodes[elements[imap].emap[0]].w[iw] * (4 * t1 - 1) * jac[0][1] +
-           nodes[elements[imap].emap[1]].w[iw] * (4 * t2 - 1) * jac[1][1] +
-           nodes[elements[imap].emap[2]].w[iw] * (4 * t3 - 1) * jac[2][1] +
-           nodes[elements[imap].emap[3]].w[iw] *
-               (4 * t2 * jac[0][1] + 4 * t1 * jac[1][1]) +
-           nodes[elements[imap].emap[4]].w[iw] *
-               (4 * t3 * jac[0][1] + 4 * t1 * jac[2][1]) +
-           nodes[elements[imap].emap[5]].w[iw] *
-               (4 * t3 * jac[1][1] + 4 * t2 * jac[2][1])) /
-         det;
-    wy = -(nodes[elements[imap].emap[0]].w[iw] * (4 * t1 - 1) * jac[0][2] +
-           nodes[elements[imap].emap[1]].w[iw] * (4 * t2 - 1) * jac[1][2] +
-           nodes[elements[imap].emap[2]].w[iw] * (4 * t3 - 1) * jac[2][2] +
-           nodes[elements[imap].emap[3]].w[iw] *
-               (4 * t2 * jac[0][2] + 4 * t1 * jac[1][2]) +
-           nodes[elements[imap].emap[4]].w[iw] *
-               (4 * t3 * jac[0][2] + 4 * t1 * jac[2][2]) +
-           nodes[elements[imap].emap[5]].w[iw] *
-               (4 * t3 * jac[1][2] + 4 * t2 * jac[2][2])) /
-         det;
-  } else {
-    wx = -(nodes[elements[imap].emap[0]].w[iw] *
-               ((1 - t2) * (2 * t1 + t2) * jac[0][0] +
-                (1 - t1) * (t1 + 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[1]].w[iw] *
-               ((1 - t2) * (2 * t1 - t2) * jac[0][0] -
-                (1 + t1) * (t1 - 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[2]].w[iw] *
-               ((1 + t2) * (2 * t1 + t2) * jac[0][0] +
-                (1 + t1) * (t1 + 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[3]].w[iw] *
-               ((1 + t2) * (2 * t1 - t2) * jac[0][0] -
-                (1 - t1) * (t1 - 2 * t2) * jac[1][0]) /
-               4 +
-           nodes[elements[imap].emap[4]].w[iw] *
-               (t1 * (t2 - 1) * jac[0][0] +
-                (t1 - 1) * (t1 + 1) * jac[1][0] / 2) +
-           nodes[elements[imap].emap[5]].w[iw] *
-               ((1 - t2) * (1 + t2) * jac[0][0] / 2 -
-                (1 + t1) * t2 * jac[1][0]) +
-           nodes[elements[imap].emap[6]].w[iw] *
-               (-t1 * (1 + t2) * jac[0][0] +
-                (1 - t1) * (1 + t1) * jac[1][0] / 2) +
-           nodes[elements[imap].emap[7]].w[iw] *
-               ((t2 - 1) * (1 + t2) * jac[0][0] / 2 +
-                (t1 - 1) * t2 * jac[1][0])) /
-         det;
-    wy = -(nodes[elements[imap].emap[0]].w[iw] *
-               ((1 - t2) * (2 * t1 + t2) * jac[0][1] +
-                (1 - t1) * (t1 + 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[1]].w[iw] *
-               ((1 - t2) * (2 * t1 - t2) * jac[0][1] -
-                (1 + t1) * (t1 - 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[2]].w[iw] *
-               ((1 + t2) * (2 * t1 + t2) * jac[0][1] +
-                (1 + t1) * (t1 + 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[3]].w[iw] *
-               ((1 + t2) * (2 * t1 - t2) * jac[0][1] -
-                (1 - t1) * (t1 - 2 * t2) * jac[1][1]) /
-               4 +
-           nodes[elements[imap].emap[4]].w[iw] *
-               (t1 * (t2 - 1) * jac[0][1] +
-                (t1 - 1) * (t1 + 1) * jac[1][1] / 2) +
-           nodes[elements[imap].emap[5]].w[iw] *
-               ((1 - t2) * (1 + t2) * jac[0][1] / 2 -
-                (1 + t1) * t2 * jac[1][1]) +
-           nodes[elements[imap].emap[6]].w[iw] *
-               (-t1 * (1 + t2) * jac[0][1] +
-                (1 - t1) * (1 + t1) * jac[1][1] / 2) +
-           nodes[elements[imap].emap[7]].w[iw] *
-               ((t2 - 1) * (t2 + 1) * jac[0][1] / 2 +
-                (t1 - 1) * t2 * jac[1][1])) /
-         det;
-  }
-
-  // Transform field to global coordinates
-  UnmapFields(wx, wy, wz, x, y, z, xmirrored, ymirrored, zmirrored, rcoordinate,
-              rotation);
-}
-
-double ComponentAnsys121::WeightingPotential(const double xin, const double yin,
-                                             const double zin,
-                                             const std::string label) {
-
-  // Do not proceed if not properly initialised.
-  if (!ready) return 0.;
-
-  // Look for the label.
-  int iw = 0;
-  bool found = false;
-  for (int i = nWeightingFields; i--;) {
-    if (wfields[i] == label) {
-      iw = i;
-      found = true;
-      break;
-    }
-  }
-
-  // Do not proceed if the requested weighting field does not exist.
-  if (!found) return 0.;
-  // Check if the weighting field is properly initialised.
-  if (!wfieldsOk[iw]) return 0.;
-
-  // Copy the coordinates.
-  double x = xin, y = yin, z = zin;
-
-  // Map the coordinates onto field map coordinates.
-  bool xmirrored, ymirrored, zmirrored;
-  double rcoordinate, rotation;
-  MapCoordinates(x, y, z, xmirrored, ymirrored, zmirrored, rcoordinate,
-                 rotation);
-
-  if (warning) {
-    std::cerr << m_className << "::WeightingPotential:\n";
-    std::cerr << "    Warnings have been issued for this field map.\n";
-  }
-
-  // Find the element that contains this point.
-  double t1, t2, t3, t4, jac[4][4], det;
-  int imap = FindElement5(x, y, z, t1, t2, t3, t4, jac, det);
-  // Check if the point is in the mesh
-  if (imap < 0) return 0.;
-
-  if (debug) {
-    std::cerr << m_className << "::WeightingPotential:\n";
-    std::cout << "    Global: (" << x << ", " << y << "),\n";
-    std::cout << "    Local: (" << t1 << ", " << t2 << ", " << t3 << ", " << t4
-              << ") in element " << imap
-              << " (degenerate: " << elements[imap].degenerate << ")\n";
-    std::cout
-        << "                  Node             x            y            V\n";
-    for (int i = 0; i < 8; ++i) {
-      printf("                  %-5d %12g %12g %12g\n", elements[imap].emap[i],
-             nodes[elements[imap].emap[i]].x, nodes[elements[imap].emap[i]].y,
-             nodes[elements[imap].emap[i]].w[iw]);
-    }
-  }
-
-  // Calculate quadrilateral field, which can degenerate to a triangular field
-  if (elements[imap].degenerate) {
-    return nodes[elements[imap].emap[0]].w[iw] * t1 * (2 * t1 - 1) +
-           nodes[elements[imap].emap[1]].w[iw] * t2 * (2 * t2 - 1) +
-           nodes[elements[imap].emap[2]].w[iw] * t3 * (2 * t3 - 1) +
-           4 * nodes[elements[imap].emap[3]].w[iw] * t1 * t2 +
-           4 * nodes[elements[imap].emap[4]].w[iw] * t1 * t3 +
-           4 * nodes[elements[imap].emap[5]].w[iw] * t2 * t3;
-  }
-
-  return -nodes[elements[imap].emap[0]].w[iw] * (1 - t1) * (1 - t2) *
-             (1 + t1 + t2) / 4 -
-         nodes[elements[imap].emap[1]].w[iw] * (1 + t1) * (1 - t2) *
-             (1 - t1 + t2) / 4 -
-         nodes[elements[imap].emap[2]].w[iw] * (1 + t1) * (1 + t2) *
-             (1 - t1 - t2) / 4 -
-         nodes[elements[imap].emap[3]].w[iw] * (1 - t1) * (1 + t2) *
-             (1 + t1 - t2) / 4 +
-         nodes[elements[imap].emap[4]].w[iw] * (1 - t1) * (1 + t1) * (1 - t2) /
-             2 +
-         nodes[elements[imap].emap[5]].w[iw] * (1 + t1) * (1 + t2) * (1 - t2) /
-             2 +
-         nodes[elements[imap].emap[6]].w[iw] * (1 - t1) * (1 + t1) * (1 + t2) /
-             2 +
-         nodes[elements[imap].emap[7]].w[iw] * (1 - t1) * (1 + t2) * (1 - t2) /
-             2;
-}
-
-Medium* ComponentAnsys121::GetMedium(const double& xin, const double& yin,
-                                     const double& zin) {
-
-  // Copy the coordinates.
-  double x = xin, y = yin, z = 0.;
-
-  // Map the coordinates onto field map coordinates.
-  bool xmirrored, ymirrored, zmirrored;
-  double rcoordinate, rotation;
-  MapCoordinates(x, y, z, xmirrored, ymirrored, zmirrored, rcoordinate,
-                 rotation);
-
-  if (zin < zMinBoundingBox || z > zMaxBoundingBox) {
-    return NULL;
-  }
-
-  // Do not proceed if not properly initialised.
-  if (!ready) {
-    std::cerr << m_className << "::GetMedium:\n";
-    std::cerr << "    Field map not available for interpolation.\n";
-    return NULL;
-  }
-  if (warning) {
-    std::cerr << m_className << "::GetMedium:\n";
-    std::cerr << "    Warnings have been issued for this field map.\n";
-  }
-
-  // Find the element that contains this point.
-  double t1, t2, t3, t4, jac[4][4], det;
-  int imap = FindElement5(x, y, z, t1, t2, t3, t4, jac, det);
-  if (imap < 0) {
-    if (debug) {
-      std::cerr << m_className << "::GetMedium:\n";
-      std::cerr << "    Point (" << x << ", " << y << ") not in the mesh.\n";
-    }
-    return NULL;
-  }
-  if (elements[imap].matmap < 0 || elements[imap].matmap >= nMaterials) {
-    if (debug) {
-      std::cerr << m_className << "::GetMedium:\n";
-      std::cerr << "    Point (" << x << ", " << y << ")"
-                << " has out of range material number " << imap << ".\n";
-    }
-    return NULL;
-  }
-
-  if (debug) {
-    std::cout << m_className << "::GetMedium:\n";
-    std::cout << "    Global: (" << x << ", " << y << "),\n";
-    std::cout << "    Local: (" << t1 << ", " << t2 << ", " << t3 << ", " << t4
-              << ") in element " << imap
-              << " (degenerate: " << elements[imap].degenerate << ")\n";
-    std::cout
-        << "                  Node             x            y            V\n";
-    for (int i = 0; i < 8; i++) {
-      printf("                 %-5d %12g %12g %12g\n", elements[imap].emap[i],
-             nodes[elements[imap].emap[i]].x, nodes[elements[imap].emap[i]].y,
-             nodes[elements[imap].emap[i]].v);
-    }
-  }
-
-  // Assign a medium.
-  return materials[elements[imap].matmap].medium;
-}
-
 void ComponentAnsys121::SetRangeZ(const double zmin, const double zmax) {
-
   if (fabs(zmax - zmin) <= 0.) {
-    std::cerr << m_className << "::SetRangeZ:\n";
-    std::cerr << "    Zero range is not permitted.\n";
+    std::cerr << m_className << "::SetRangeZ: Zero range is not permitted.\n";
     return;
   }
-  zMinBoundingBox = mapzmin = std::min(zmin, zmax);
-  zMaxBoundingBox = mapzmax = std::max(zmin, zmax);
+  m_minBoundingBox[2] = m_mapmin[2] = std::min(zmin, zmax);
+  m_maxBoundingBox[2] = m_mapmax[2] = std::max(zmin, zmax);
 }
 
-void ComponentAnsys121::UpdatePeriodicity() {
-
-  UpdatePeriodicity2d();
-  UpdatePeriodicityCommon();
-}
-
-double ComponentAnsys121::GetElementVolume(const int i) {
-
-  if (i < 0 || i >= nElements) return 0.;
-  const double surf =
-      (fabs((nodes[elements[i].emap[1]].x - nodes[elements[i].emap[0]].x) *
-                (nodes[elements[i].emap[2]].y - nodes[elements[i].emap[0]].y) -
-            (nodes[elements[i].emap[2]].x - nodes[elements[i].emap[0]].x) *
-                (nodes[elements[i].emap[1]].y - nodes[elements[i].emap[0]].y)) +
-       fabs(
-           (nodes[elements[i].emap[3]].x - nodes[elements[i].emap[0]].x) *
-               (nodes[elements[i].emap[2]].y - nodes[elements[i].emap[0]].y) -
-           (nodes[elements[i].emap[2]].x - nodes[elements[i].emap[0]].x) *
-               (nodes[elements[i].emap[3]].y - nodes[elements[i].emap[0]].y))) /
-      2.;
-  return surf;
-}
-
-void ComponentAnsys121::GetAspectRatio(const int i, double& dmin,
-                                       double& dmax) {
-
-  if (i < 0 || i >= nElements) {
-    dmin = dmax = 0.;
-    return;
-  }
-
-  const int np = 8;
-  // Loop over all pairs of vertices.
-  for (int j = 0; j < np - 1; ++j) {
-    for (int k = j + 1; k < np; ++k) {
-      // Compute distance.
-      const double dist = sqrt(
-          pow(nodes[elements[i].emap[j]].x - nodes[elements[i].emap[k]].x, 2) +
-          pow(nodes[elements[i].emap[j]].y - nodes[elements[i].emap[k]].y, 2));
-      if (k == 1) {
-        dmin = dist;
-        dmax = dist;
-      } else {
-        if (dist < dmin) dmin = dist;
-        if (dist > dmax) dmax = dist;
-      }
-    }
-  }
-}
 }

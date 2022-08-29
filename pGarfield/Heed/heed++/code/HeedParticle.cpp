@@ -1,196 +1,163 @@
 #include <iomanip>
+#include <numeric>
 #include "wcpplib/clhep_units/WPhysicalConstants.h"
 #include "wcpplib/random/ranluxint.h"
 #include "wcpplib/random/pois.h"
+#include "wcpplib/random/rnorm.h"
 #include "wcpplib/math/kinem.h"
 #include "wcpplib/math/tline.h"
-#include "heed++/code/ParticleBank.h"
 #include "heed++/code/HeedParticle.h"
 #include "heed++/code/HeedCluster.h"
-#include "heed++/code/HeedDeltaElectron.h"
 #include "heed++/code/HeedPhoton.h"
 #include "heed++/code/EnTransfCS.h"
-/*
-2003-2008, I. Smirnov
-*/
+
+// 2003-2008, I. Smirnov
 
 namespace Heed {
 
+using CLHEP::c_light;
+using CLHEP::c_squared;
+using CLHEP::cm;
+using CLHEP::MeV;
+using CLHEP::electron_mass_c2;
+
 HeedParticle::HeedParticle(manip_absvol* primvol, const point& pt,
-                           const vec& vel, vfloat time, particle_def* fpardef,
-                           int fs_loss_only, int fs_print_listing)
-    : eparticle(primvol, pt, vel, time, fpardef),
-      s_print_listing(fs_print_listing),
-      transferred_energy_in_step(0.0),
-      qtransfer(0),
-      s_loss_only(fs_loss_only) {
+                           const vec& vel, vfloat ftime, particle_def* fpardef,
+                           HeedFieldMap* fieldmap, 
+                           const bool fcoulomb_scattering,
+                           const bool floss_only,
+                           const bool fprint_listing)
+    : eparticle(primvol, pt, vel, ftime, fpardef, fieldmap),
+      m_coulomb_scattering(fcoulomb_scattering),
+      m_loss_only(floss_only),
+      m_print_listing(fprint_listing),
+      m_particle_number(s_counter++) {}
 
-  mfunname("HeedParticle::HeedParticle(...)");
-  particle_number = last_particle_number;
-  last_particle_number++;
-  transferred_energy.allocate_block(100);
-  natom.allocate_block(100);
-  nshell.allocate_block(100);
-
-}
-
-void HeedParticle::physics(void) {
-  mfunname("void HeedParticle::physics(void)");
-  if (s_print_listing == 1) {
+void HeedParticle::physics(std::vector<gparticle*>& secondaries) {
+  mfunname("void HeedParticle::physics()");
+  if (m_print_listing) {
     mcout << "HeedParticle::physics is started\n";
-    Iprintn(mcout, currpos.prange);
+    Iprintn(mcout, m_currpos.prange);
   }
-  transferred_energy_in_step = 0.0;
-  qtransfer = 0;
-  transferred_energy.allocate_block(100);
-  natom.allocate_block(100);
-  nshell.allocate_block(100);
-  if (currpos.prange <= 0.0) return;
-  // Get least address of volume
-  const absvol* av = currpos.G_lavol();
-  const EnTransfCSType* etcst = dynamic_cast<const EnTransfCSType*>(av);
-  // Check if dynamic cast was successful.
-  if (etcst == NULL) return;
-
-  EnTransfCS* aetcs = etcst->etcs.getver();
-  HeedMatterDef* ahmd = aetcs->hmd.getver();
-  MatterDef* amatter = ahmd->matter.getver();
-  EnergyMesh* a_energy_mesh = ahmd->energy_mesh.getver();
-  const double* aetemp = ahmd->energy_mesh->get_ae();
-  PointCoorMesh<double, const double*> pcm_e(a_energy_mesh->get_q() + 1,
-                                             &(aetemp));
-  long qa = amatter->qatom();
-  if (s_print_listing == 1) Iprintn(mcout, qa);
-  basis tempbas(currpos.dir, "tempbas");
+  // Get the step.
+  if (m_currpos.prange <= 0.0) return;
+  const double stp = m_currpos.prange / cm;
+  const vec dir = unit_vec(m_currpos.pt - m_prevpos.pt);
+  const double range = (m_currpos.pt - m_prevpos.pt).length();
+  if (m_print_listing) Iprint3n(mcout, m_prevpos.pt, dir, range);
+  // Get local volume.
+  const absvol* av = m_currpos.volume();
+  auto etcs = dynamic_cast<const EnTransfCS*>(av);
+  if (!etcs) return;
+  HeedMatterDef* hmd = etcs->hmd;
+  MatterDef* matter = hmd->matter;
+  EnergyMesh* emesh = hmd->energy_mesh;
+  const double* aetemp = emesh->get_ae();
+  PointCoorMesh<double, const double*> pcm(emesh->get_q() + 1, &(aetemp));
+  basis tempbas(m_currpos.dir, "tempbas");
+  // Particle mass and energy.
+  const double mp = m_mass * c_squared;
+  const double ep = mp + m_curr_ekin;
+  // Electron mass.
+  const double mt = electron_mass_c2;
+  // Particle velocity.
+  const double invSpeed = 1. / m_prevpos.speed;
+  // Shorthand.
+  const auto sampleTransfer = t_hisran_step_ar<double, std::vector<double>,
+                                               PointCoorMesh<double, const double*> >;
+  const long qa = matter->qatom();
+  if (m_print_listing) Iprintn(mcout, qa);
   for (long na = 0; na < qa; ++na) {
-    if (s_print_listing == 1) Iprintn(mcout, na);
-    long qs = ahmd->apacs[na]->get_qshell();
+    if (m_print_listing) Iprintn(mcout, na);
+    const long qs = hmd->apacs[na]->get_qshell();
     for (long ns = 0; ns < qs; ++ns) {
-      if (s_print_listing == 1) Iprintn(mcout, ns);
-      long qt = 0;
-#ifdef SINGLE_TRANSFER
-      if (aetcs == aetcs_single_transf && na == na_single_transf &&
-          ns == ns_single_transf) {
-        qt = 1;
-      }
-#else
-      if (aetcs->quan[na][ns] > 0.0) {
-        int ierror;
-        qt = pois(aetcs->quan[na][ns] * currpos.prange / cm, ierror);
-        check_econd11a(
-            ierror, == 1,
-            " aetcs->quan[na][ns]=" << aetcs->quan[na][ns]
-                                    << " currpos.prange/cm=" << currpos.prange /
-                                                                    cm << '\n',
-            mcerr);
-      }
-#endif
-      if (s_print_listing == 1) Iprintn(mcout, qt);
-      if (qt > 0) {
-        point curpt = prevpos.pt;
-        vec dir = unit_vec(currpos.pt - prevpos.pt);
-        double range = length(currpos.pt - prevpos.pt);
-        if (s_print_listing == 1) {
-          Iprint(mcout, curpt);
-          Iprint(mcout, dir);
-          Iprintn(mcout, range);
+      if (m_print_listing) Iprintn(mcout, ns);
+      if (etcs->quan[na][ns] <= 0.0) continue;
+      // Sample the number of collisions for this shell.
+      const long qt = pois(etcs->quan[na][ns] * stp);
+      if (m_print_listing) Iprintn(mcout, qt);
+      if (qt <= 0) continue;
+      for (long nt = 0; nt < qt; ++nt) {
+        // Sample the energy transfer in this collision.
+        const double r = sampleTransfer(pcm, etcs->fadda[na][ns], SRANLUX());
+        // Convert to internal units.
+        const double et = r * MeV;
+        m_edep += et;
+        if (m_print_listing) Iprint2n(mcout, nt, et);
+        // Sample the position of the collision.
+        const double arange = SRANLUX() * range;
+        point pt = m_prevpos.pt + dir * arange;
+        if (m_loss_only) continue;
+        if (m_print_listing) mcout << "generating new cluster\n";
+        if (m_store_clusters) {
+          m_clusterBank.emplace_back(HeedCluster(et, pt, na, ns));
         }
-        for (long nt = 0; nt < qt; ++nt) {
-#ifdef SINGLE_TRANSFER
-          transferred_energy.append(ener_single_transf);
-#else
-          double rn = SRANLUX();
-          if (s_print_listing == 1) {
-            Iprintn(mcout, rn);
-            Iprintn(mcout, aetcs);
-            Iprintn(mcout, aetcs->fadda[na][ns][1]);
-          }
-          double r = t_hisran_step_ar<double, DynLinArr<double>,
-                                      PointCoorMesh<double, const double*> >(
-              pcm_e, aetcs->fadda[na][ns], rn);
-
-          // Convert to internal units.
-          transferred_energy.append(r * MeV);
-#endif
-          if (s_print_listing == 1) {
-            Iprint2n(mcout, nt, transferred_energy[qtransfer]);
-          }
-          transferred_energy_in_step += transferred_energy[qtransfer];
-          natom.append(na);
-          nshell.append(ns);
-#ifdef SINGLE_TRANSFER
-          double arange = 0.5 * range;
-#else
-          double arange = SRANLUX() * range;
-#endif
-          point pt = curpt + dir * arange;
-          point ptloc = pt;
-          prevpos.tid.up_absref(&ptloc);
-          qtransfer++;
-          if (s_loss_only == 0) {
-            if (s_print_listing == 1) {
-              mcout << "generating new cluster\n";
-            }
-            cluster_bank.append(HeedCluster(transferred_energy[qtransfer - 1],
-                                            0, pt, ptloc, prevpos.tid, na, ns));
-
-            double Ep0 = mass * c_squared + curr_kin_energy;
-            double Ep1 = Ep0 - transferred_energy[qtransfer - 1];
-            double Mp = mass;
-            double Mt = electron_def.mass;
-            double theta_p, theta_t;
-            theta_two_part(Ep0, Ep1, Mp, Mt, theta_p, theta_t);
-            vec vel;
-            vel.random_conic_vec(fabs(theta_t));
-            vel.down(&tempbas);  // direction is OK
-            vel *= c_light;
-            // HS
-            double speed = length(vel);
-            double time = arange / speed;
-            if (s_print_listing == 1) {
-              mcout << "generating new virtual photon\n";
-            }
-            HeedPhoton hp(currpos.tid.eid[0].amvol.getver(), pt, vel, time,
-                          particle_number, transferred_energy[qtransfer - 1],
-                          0);
-            hp.s_photon_absorbed = 1;
-            hp.s_delta_generated = 0;
-            hp.na_absorbing = na;
-            hp.ns_absorbing = ns;
-            ActivePtr<gparticle> ac;
-            ac.put(&hp);
-            particle_bank.insert_after(particle_bank.get_last_node(), ac);
-          }
+        // Generate a virtual photon.
+        double theta_p, theta_t;
+        theta_two_part(ep, ep - et, mp, mt, theta_p, theta_t);
+        vec vel;
+        vel.random_conic_vec(fabs(theta_t));
+        vel.down(&tempbas);  // direction is OK
+        vel *= c_light;
+        const double t = m_prevpos.time + arange * invSpeed;
+        if (m_print_listing) mcout << "generating new virtual photon\n";
+        HeedPhoton* hp = new HeedPhoton(m_currpos.tid.eid[0], pt, vel, t,
+                                        m_particle_number, et, m_fieldMap);
+        if (!hp->alive()) {
+          delete hp;
+          continue;
         }
+        hp->m_photon_absorbed = true;
+        hp->m_delta_generated = false;
+        hp->m_na_absorbing = na;
+        hp->m_ns_absorbing = ns;
+        secondaries.push_back(hp);
       }
     }
   }
-  if (s_print_listing == 1) {
-    Iprint2n(mcout, qtransfer, transferred_energy_in_step);
+
+  if (m_edep >= m_curr_ekin) {
+    // Accumulated energy loss exceeds the particle's kinetic energy.
+    m_alive = false;
+  } 
+
+  if (m_coulomb_scattering) {
+    if (hmd->radiation_length > 0.) {
+      const double x = range / hmd->radiation_length;
+      const double sigma = etcs->sigma_ms * sqrt(x);
+      double theta = sigma * rnorm_improved();
+      turn(cos(theta), sin(theta));
+    }
+  }
+  if (m_print_listing) {
+    Iprintn(mcout, m_edep);
     mcout << "Exiting HeedParticle::physics\n";
   }
 }
 
-void HeedParticle::print(std::ostream& file, int l) const {
-  if (l >= 0) {
-    Ifile << "HeedParticle (l=" << l << "): particle_number=" << particle_number
-          << " type=";
-    print_notation(file);
-    file << std::endl;
-    if (l == 1) return;
-    mparticle::print(file, l - 1);
-    Iprintn(mcout, transferred_energy_in_step);
-    Iprintn(mcout, qtransfer);
-    if (l >= 5) {
-      Ifile << "   nt  natom nshell transferred_energy\n";
-      for (long nt = 0; nt < qtransfer; nt++) {
-        Ifile << std::setw(3) << nt << ' ' << std::setw(3) << natom[nt] << ' '
-              << std::setw(3) << nshell[nt] << ' ' << std::setw(12)
-              << transferred_energy[nt] << '\n';
-      }
-    }
+void HeedParticle::physics_mrange(double& fmrange) {
+  if (!m_coulomb_scattering) return;
+  // Get local volume and convert it to a cross-section object.
+  const absvol* av = m_currpos.volume();
+  auto etcs = dynamic_cast<const EnTransfCS*>(av);
+  if (!etcs) return;
+  if (etcs->quanC > 0.) {
+    // Make sure the step is smaller than the mean free path between 
+    // ionising collisions.
+    fmrange = std::min(fmrange, 0.1 / etcs->quanC);
   }
+} 
 
+void HeedParticle::print(std::ostream& file, int l) const {
+  if (l < 0) return;
+  file << "HeedParticle: particle_number=" << m_particle_number << " type=";
+  if (!m_pardef) {
+    file << "none";
+  } else {
+    file << m_pardef->notation;
+  }
+  file << "\n  edep=" << m_edep << "\n";
+  if (l <= 1) return;
+  mparticle::print(file, l - 1);
 }
-
 }

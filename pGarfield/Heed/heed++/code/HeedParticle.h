@@ -1,61 +1,51 @@
 #ifndef HEEDPARTICLE_H
 #define HEEDPARTICLE_H
 
+#include <vector>
 #include "wcpplib/particle/eparticle.h"
-#include "wcpplib/safetl/AbsList.h"
-#include "wcpplib/safetl/BlkArr.h"
-/*
-Definition of the particle which can be traced through the
-geometry. Also the definition of cluster (energy transfer),
-and particle bank.
-
-2003, I. Smirnov
-*/
-
-//#define SINGLE_TRANSFER // for debug
-#ifdef SINGLE_TRANSFER
-#include "heed++/code/EnTransfCS.h"
-extern EnTransfCS* aetcs_single_transf;
-extern long na_single_transf;
-extern long ns_single_transf;
-extern double ener_single_transf;
-#endif
+#include "HeedCluster.h"
 
 namespace Heed {
 
-extern long last_particle_number;  // for debug print
-// Each particle is identified by particle_number.
-// It is assigned by current last_particle_number which is then incremented
+/// Charged particle which can be traced through the geometry.
+///
+/// 2003, I. Smirnov
 
 class HeedParticle : public eparticle {
  public:
-  /// Constructors
-  HeedParticle(void) : eparticle() {}
+  /// Default constructor
+  HeedParticle() : eparticle() {}
+  /// Constructor.
+  /// If fs_loss_only == false only transferred energy
+  /// is simulated: no deposition of clusters,
+  /// no generation of virtual photons.
   HeedParticle(manip_absvol* primvol, const point& pt, const vec& vel,
-               vfloat time, particle_def* fpardef, int fs_loss_only = 0,
-               int fs_print_listing = 0);
-  // If fs_loss_only == 1 only transferred energy
-  // is simulated: no deposition of clusters,
-  // no generation of virtual photons.
-  macro_copy_total(HeedParticle);
+               vfloat time, particle_def* fpardef, HeedFieldMap* fieldmap,
+               const bool fcoulomb_scattering = false,
+               const bool floss_only = false,
+               const bool fprint_listing = false);
   /// Destructor
   virtual ~HeedParticle() {}
 
-  virtual void physics(void);
-  virtual void print(std::ostream& file, int l) const;
+  HeedParticle* copy() const override { return new HeedParticle(*this); }
+  void print(std::ostream& file, int l) const override;
 
-  int s_print_listing;
-  long particle_number;
+ protected:
+  void physics(std::vector<gparticle*>& secondaries) override;
+  void physics_mrange(double& fmrange) override;
 
-  double transferred_energy_in_step;
-  long qtransfer;
-  int s_loss_only;
-  BlkArr<double> transferred_energy;
-  BlkArr<long> natom;
-  BlkArr<long> nshell;
+ private:
+  bool m_coulomb_scattering = false;
+  bool m_loss_only = false;
+  bool m_print_listing = false;
+  bool m_store_clusters = false;
 
+  long m_particle_number = 0;
+
+  double m_edep = 0.;
+
+  std::vector<HeedCluster> m_clusterBank;
 };
-
 }
 
 #endif

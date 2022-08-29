@@ -15,13 +15,13 @@ The file is provided "as is" without express or implied warranty.
 
 namespace Heed {
 
-// **** straight ****
+// **** straight line ****
 
-absref absref::*(straight::aref[2]) = {(absref absref::*)&straight::piv,
-                                       (absref absref::*)&straight::dir };
+absref absref::* straight::aref[2] = {(absref absref::*)&straight::piv,
+                                      (absref absref::*)&straight::dir};
 
-void straight::get_components(ActivePtr<absref_transmit>& aref_tran) {
-  aref_tran.pass(new absref_transmit(2, aref));
+absref_transmit straight::get_components() {
+  return absref_transmit(2, aref);
 }
 
 straight::straight(const plane pl1, const plane pl2) {
@@ -37,14 +37,11 @@ int operator==(const straight& sl1, const straight& sl2) {
   return 0;
 }
 
-int apeq(const straight& sl1, const straight& sl2, vfloat prec) {
-  pvecerror("int apeq(const straight &sl1, const straight &sl2, vfloat "
-            "prec=vprecision)");
-  int i = check_par(sl1.dir, sl2.dir, prec);
-  if (i == 0) return 0;
-  if (apeq(sl1.piv, sl2.piv, prec)) return 1;
-  if (sl1.check_point_in(sl2.piv, prec) == 1) return 1;
-  return 0;
+bool apeq(const straight& sl1, const straight& sl2, vfloat prec) {
+  pvecerror("bool apeq(const straight &sl1, const straight &sl2, vfloat prec)");
+  if (check_par(sl1.dir, sl2.dir, prec) == 0) return false;
+  if (apeq(sl1.piv, sl2.piv, prec)) return true;
+  return (sl1.check_point_in(sl2.piv, prec) == 1);
 }
 
 int straight::check_point_in(const point& fp, vfloat prec) const {
@@ -74,51 +71,53 @@ point straight::cross(const straight& sl, vfloat prec) const {
 
 vfloat straight::vecdistance(const straight& sl, int& type_of_cross,
                              point pt[2]) const {
-  pvecerror("vfloat straight::distance(const straight& sl, int type_of_cross,  "
-            "point pt[2])");
+  pvecerror(
+      "vfloat straight::vecdistance(const straight& sl, int& type_of_cross, "
+      "point pt[2])");
   pt[0] = point();
   pt[1] = point();
   type_of_cross = 0;
   straight s1, s2;
   s1 = *this;
-  s2 = sl;                                    // s2 may be changed
-                                              //mcout<<s1<<s2;
-  if (s1.piv == s2.piv) {                     // the same origin point
-    if (check_par(s1.dir, s2.dir, 0.0) != 0)  // parallel or anti-parallel
-        {
+  s2 = sl;  // s2 may be changed
+  if (s1.piv == s2.piv) {                     
+    // the same origin point
+    if (check_par(s1.dir, s2.dir, 0.0) != 0) {
+      // parallel or anti-parallel
       type_of_cross = 3;
       return 0.0;  // coincidence
     } else {       // crossed in piv;
       return 0.0;
     }
   }
-  if (check_par(s1.dir, s2.dir, 0.0) != 0)  // parallel or anti-parallel
-      {
-    if (s1.check_point_in(s2.piv, 0.0) == 1) {  // point in => the same line
+  if (check_par(s1.dir, s2.dir, 0.0) != 0) {
+    // parallel or anti-parallel
+    if (s1.check_point_in(s2.piv, 0.0) == 1) {  
+      // point in => the same line
       type_of_cross = 3;
       return 0.0;
-    } else  // not crossed
-        {
+    } else {
+      // not crossed
       type_of_cross = 2;  // different parallel lines
       return s1.distance(s2.piv);
     }
   }  // now we know that the lines are not parallel
 
   basis bs(s1.dir, s2.dir, "local");
-  //ez is parallel to s1.dir,                        ez=unit_vec(s1.dir)
-  //ey is perpendicular to plane which have s1.dir and s2.dir,
+  // ez is parallel to s1.dir,                        ez=unit_vec(s1.dir)
+  // ey is perpendicular to plane which have s1.dir and s2.dir,
   //                                                 ey=unit_vec(ez||s2.dir)
-  //ex is vector product of ey and ez,               ex=ey||ez
-  //mcout<<bs;
+  // ex is vector product of ey and ez,               ex=ey||ez
+  // mcout<<bs;
   fixsyscoor scl(&s1.piv, &bs, "local");
-  //mcout<<scl;
+  // mcout<<scl;
   plane pn(point(0, 0, 0), vec(1, 0, 0));  // assumed to be in scl
                                            // This plane is defined by
-                                           //mcout<<pn;
+  // mcout<<pn;
   s2.up(&scl);
-  //mcout<<s2;
+  // mcout<<s2;
   pt[1] = pn.cross(s2);
-  //mcout<<pt;
+  // mcout<<pt;
   if (pt[1].v.y == 0) {
     pt[1].down(&scl);
     pt[0] = pt[1];
@@ -141,9 +140,7 @@ vfloat straight::distance(const straight& sl, int& type_of_cross,
 
 straight::straight(straight* sl, int qsl, const straight& sl_start, int anum,
                    vfloat precision, vfloat* dist,  // may be negative
-                   point (*pt)[2], vfloat& mean2dist)
-                                                    // xi2
-    {
+                   point (*pt)[2], vfloat& mean2dist) {
   pvecerror("void straight::straight(straight* sl, int qsl,...");
   check_econd11(qsl, < 4, mcerr);
   straight sl_finish = sl_start;
@@ -152,7 +149,7 @@ straight::straight(straight* sl, int qsl, const straight& sl_start, int anum,
   vfloat mean2dist_prev = max_vfloat;
   int type_of_cross;
   point* ptf = new point[qsl];
-  //mcout<<"straight::straight: starting, qsl="<<qsl
+  // mcout<<"straight::straight: starting, qsl="<<qsl
   //     <<"\nsl_start="<<sl_start<<'\n';
   do {
     mean2dist_prev = mean2dist;
@@ -167,25 +164,25 @@ straight::straight(straight* sl, int qsl, const straight& sl_start, int anum,
     mean2dist /= qsl;
     if (mean2dist > 0) mean2dist = sqrt(mean2dist);
     sl_finish = straight(ptf, qsl, anum);
-    //mcout<<"straight::straight: mean2dist_prev="<<mean2dist_prev
+    // mcout<<"straight::straight: mean2dist_prev="<<mean2dist_prev
     //	 <<" mean2dist="<<mean2dist<<'\n';
-    //for( n=0; n<qsl; n++)
+    // for( n=0; n<qsl; n++)
     //{
     //  mcout<<"pt[n][0]="<<pt[n][0]<<'\n';
     //  mcout<<"pt[n][1]="<<pt[n][1]<<'\n';
     //}
   } while (mean2dist_prev < mean2dist ||
            (mean2dist != 0 && mean2dist_prev - mean2dist > precision));
-  //mcout<<"straight::straight: finishinging, *this="<<(*this)<<'\n';
-  delete ptf;
+  delete[] ptf;
 }
 
 vfloat straight::distance(const point& fpt) const {
   pvecerror("vfloat straight::distance(point& fpt)");
   if (fpt == piv) return 0.0;
   vec v = fpt - piv;
-  return length(v) * sin2vec(dir, v);  // should be positive
+  return v.length() * sin2vec(dir, v);  // should be positive
 }
+
 vfloat straight::distance(const point& fpt, point& fcpt) const {
   pvecerror("vfloat straight::distance(point& fpt, point& fcpt)");
   if (fpt == piv) {
@@ -193,16 +190,16 @@ vfloat straight::distance(const point& fpt, point& fcpt) const {
     return 0.0;
   }
   vec v = fpt - piv;
-  vfloat len = length(v);
+  vfloat len = v.length();
   fcpt = piv + len * cos2vec(dir, v) * dir;
-  return length(v) * sin2vec(dir, v);
+  return v.length() * sin2vec(dir, v);
 }
 
 point straight::vecdistance(const vec normal, const straight& slt) {
   pvecerror(
       "vfloat straight::vecdistance(const vec normal, const straight& slt)");
-  if (check_perp(normal, slt.Gdir(), 0.0) == 1)  // if it is perp.
-      {
+  if (check_perp(normal, slt.Gdir(), 0.0) == 1) {
+    // if it is perp.
     mcout << "straight::vecdistance: normal=" << normal
           << " slt.Gdir()=" << slt.Gdir();
     vecerror = 1;
@@ -216,8 +213,8 @@ point straight::vecdistance(const vec normal, const straight& slt) {
   return pn.cross(slh);
 }
 
-straight::straight(const point* pt, int qpt, int anum)  // interpolates by xi2
-    {
+straight::straight(const point* pt, int qpt, int anum) {
+  // interpolates by xi2
   pvecerror("straight::straight(const point* pt, int qpt, int anum) ");
   check_econd11(qpt, < 2, mcerr);
   check_econd21(anum, < 0 ||, >= 3, mcerr);
@@ -229,8 +226,7 @@ straight::straight(const point* pt, int qpt, int anum)  // interpolates by xi2
   double* x = new double[qpt];
   double* y = new double[qpt];
   double* z = new double[qpt];
-  int n;
-  for (n = 0; n < qpt; n++) {
+  for (int n = 0; n < qpt; n++) {
     x[n] = pt[n].v.x;
     y[n] = pt[n].v.y;
     z[n] = pt[n].v.z;
@@ -258,14 +254,14 @@ straight::straight(const point* pt, int qpt, int anum)  // interpolates by xi2
   }
   dir = unit_vec(piv1 - piv);
 
-  delete x;
-  delete y;
-  delete z;
+  delete[] x;
+  delete[] y;
+  delete[] z;
 }
 
 straight::straight(const straight sl[4], point pt[2], vfloat precision) {
-  pvecerror("straight::straight(const straight sl[4], point pt[2],  vfloat "
-            "precision)");
+  pvecerror(
+      "straight::straight(const straight sl[4], point pt[2],  vfloat prec");
   int i;
   vfloat meandist;
   point ptprev[2];
@@ -291,7 +287,7 @@ straight::straight(const straight sl[4], point pt[2], vfloat precision) {
       }
       plane pn(sl[is], ptcurr[ip]);
       ptcurr[i] = pn.cross(sl[isc]);
-      meandist += length2(ptcurr[i] - ptprev[i]);
+      meandist += (ptcurr[i] - ptprev[i]).length2();
       mcout << " i=" << i << " ptprev[i]=" << ptprev[i]
             << " ptcurr[i]=" << ptcurr[i] << '\n';
       ptprev[i] = ptcurr[i];
@@ -310,5 +306,4 @@ std::ostream& operator<<(std::ostream& file, const straight& s) {
   indn.n -= 2;
   return file;
 }
-
 }

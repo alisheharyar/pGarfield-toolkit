@@ -4,7 +4,7 @@
 */
 
 #include <iostream>
-#include "RandomEngineMPIServer.hh"
+#include "Garfield/RandomEngineMPIServer.hh"
 
 namespace Garfield {
 

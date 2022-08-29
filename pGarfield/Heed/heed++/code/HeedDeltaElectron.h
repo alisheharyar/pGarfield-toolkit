@@ -2,72 +2,79 @@
 #define HEEDDELTAELECTRON_H
 
 #include "wcpplib/particle/eparticle.h"
-
-/*
-Definition of delta-electron which can be traced
-through the geometry
-
-2003, I. Smirnov
-*/
+#include "heed++/code/HeedCondElectron.h"
 
 namespace Heed {
 
-extern long last_particle_number;  // for debug print
-// Each particle is identified by particle_number.
-// It is assigned by current last_particle_number which is then incremented
-// This extern is also repeated in HeedParticle.h and HeedParticle_BGM.h.
+class PairProd;
+
+/// Definition of delta-electron which can be traced through the geometry.
+/// 2003, I. Smirnov
 
 class HeedDeltaElectron : public eparticle {
  public:
-  static int s_low_mult_scattering;
-  static int s_high_mult_scattering;
+  /// Default constructor.
+  HeedDeltaElectron() = default;
+  /// Constructor.
+  HeedDeltaElectron(manip_absvol* primvol, const point& pt, const vec& vel,
+                    vfloat ftime, long fparent_particle_number,
+                    HeedFieldMap* fieldmap, bool fs_print_listing = false);
+  /// Destructor
+  virtual ~HeedDeltaElectron() {}
 
-  //PassivePtr< EnTransfCS > encs;
-  long particle_number;
-  int s_print_listing;  // convenient to print internal algorithms
-                        // of a selected event
-  double total_Eloss;
+  HeedDeltaElectron* copy() const override {
+    return new HeedDeltaElectron(*this);
+  }
+  void print(std::ostream& file, int l) const override;
 
-  // The following things are done in physics_mrange.
-  // Later mrange may be reduced by geometry.
-  // the signature of this is prange < phys_mrange
-  double phys_mrange;  // in internal units
-  int s_stop_eloss;    // sign that the range is restricted
-                       // by the loss of all energy to ionization.
-                       // It is to avoid additional little step due to
-  // limited precision at subtraction of energy loss at step from
-  // kinetic energy.
-
-  int s_mult_low_path_length;  // if 1 then the step is restricted
-  // by the condition that number of elastic scatterings with low angles
-  // should be less or equal to hdecs->eesls->get_qscat()
-  double q_low_path_length;  // number of low angle scatterings
-  int s_path_length;         // sign that the range is restricted by
-                             // path length for large angle scattering
-
-  double necessary_energy;  // ( internal units)
-                            // at next step to left conduction electron.
-                            // It is necessary energy, not the left energy
-                            // because it is randomly generated.
-  // Attention: if 0.0, then the electron is already left.
+  std::vector<HeedCondElectron> conduction_electrons;
+  std::vector<HeedCondElectron> conduction_ions;
 
   long parent_particle_number;
 
-  // Constructors
-  HeedDeltaElectron() : eparticle(), s_print_listing(0) {}
-  HeedDeltaElectron(manip_absvol* primvol, const point& pt, const vec& vel,
-                    vfloat time, long fparent_particle_number,
-                    int fs_print_listing = 0);
-  // Destructor
-  virtual ~HeedDeltaElectron() {}
+ protected:
+  void physics_mrange(double& fmrange) override;
+  void physics_after_new_speed(std::vector<gparticle*>& secondaries) override;
 
-  virtual void physics_mrange(double& fmrange);
-  virtual void physics_after_new_speed();
-  virtual void print(std::ostream& file, int l) const;
-  macro_copy_total(HeedDeltaElectron);
+ private:
+  long m_particle_number;
 
+  /// Flag to print internal algorithms of a selected event.
+  bool m_print_listing = false;
+
+  /// Physics-based step length (in internal units).
+  /// Later mrange may be reduced by geometry.
+  double m_phys_mrange = 0.;
+
+  /// Flag that the range is restricted by the loss of all energy to ionization.
+  /// It is to avoid additional little step due to limited precision at
+  /// subtraction of energy loss at step from kinetic energy.
+  bool m_stop_eloss = false;
+
+  /// Flag that the step is restricted by the condition that the number of 
+  /// elastic scatterings with low angles should be less or equal to 
+  /// hdecs->eesls->get_qscat()
+  bool m_mult_low_path_length = false;
+
+  /// Number of low angle scatterings
+  double m_q_low_path_length = 0.;
+  /// Flag that the range is restricted by path length for large angle scattering
+  bool m_path_length = false;
+
+  /// Necessary energy (in internal units) at next step to produce a
+  /// conduction electron. 
+  // It is not identical to the left energy because it is randomly generated.
+  // Attention: if 0.0, then the electron is already finished.
+  double m_necessary_energy = 0.;
+
+  double m_total_eloss = 0.;
+
+  static bool s_low_mult_scattering;
+  static bool s_high_mult_scattering;
+  static bool s_direct_low_if_little;
+
+  void ionisation(const double eloss, const double dedx, PairProd* pairprod);
 };
-
 }
 
 #endif

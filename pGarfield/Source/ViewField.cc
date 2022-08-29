@@ -1,1101 +1,920 @@
-#include <iostream>
-#include <sstream>
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
+#include <iostream>
+#include <algorithm>
 
-#include <TROOT.h>
 #include <TAxis.h>
+#include <TROOT.h>
+#include <TF1.h>
+#include <TF2.h>
+#include <TH1F.h>
 
-#include "Plotting.hh"
-#include "Sensor.hh"
-#include "ComponentBase.hh"
-#include "ViewField.hh"
+#include "Garfield/Component.hh"
+#include "Garfield/Plotting.hh"
+#include "Garfield/Random.hh"
+#include "Garfield/Sensor.hh"
+#include "Garfield/DriftLineRKF.hh"
+#include "Garfield/ViewField.hh"
+
+namespace {
+
+void SampleRange(const double xmin, const double ymin, const double xmax,
+                 const double ymax, TF2* f, double& zmin, double& zmax) {
+  constexpr unsigned int n = 1000;
+  const double dx = xmax - xmin;
+  const double dy = ymax - ymin;
+  zmin = std::numeric_limits<double>::max();
+  zmax = -zmin;
+  for (unsigned int i = 0; i < n; ++i) {
+    const double z = f->Eval(xmin + Garfield::RndmUniform() * dx,
+                             ymin + Garfield::RndmUniform() * dy);
+    if (z < zmin) zmin = z;
+    if (z > zmax) zmax = z;
+  }
+}
+
+void SampleRange(TF1* f, double& ymin, double& ymax) {
+  constexpr unsigned int n = 1000;
+  ymin = std::numeric_limits<double>::max();
+  ymax = -ymin;
+  double xmin = 0.;
+  double xmax = 1.;
+  f->GetRange(xmin, xmax);
+  const double dx = xmax - xmin;
+  for (unsigned int i = 0; i < n; ++i) {
+    const double y = f->Eval(xmin + dx * Garfield::RndmUniform());
+    if (y < ymin) ymin = y;
+    if (y > ymax) ymax = y;
+  }
+}
+
+double Interpolate(const std::array<double, 1000>& y,
+                   const std::array<double, 1000>& x, const double xx) {
+
+  const double tol = 1.e-6 * fabs(x.back() - x.front());
+  if (xx < x[0]) return y[0];
+  const auto it1 = std::upper_bound(x.cbegin(), x.cend(), xx);
+  if (it1 == x.cend()) return y.back();
+  const auto it0 = std::prev(it1);
+  const double dx = (*it1 - *it0);
+  if (dx < tol) return y[it0 - x.cbegin()];
+  const double f = (xx - *it0) / dx;
+  return y[it0 - x.cbegin()] * (1. - f) + f * y[it1 - x.cbegin()];
+}
+
+}
 
 namespace Garfield {
 
-ViewField::ViewField()
-    : className("ViewField"),
-      debug(false),
-      useStatus(false),
-      vBkg(0.),
-      sensor(0),
-      component(0),
-      pxmin(-1.),
-      pymin(-1.),
-      pxmax(1.),
-      pymax(1.),
-      fmin(0.),
-      fmax(100.),
-      emin(0.),
-      emax(10000.),
-      wmin(0.),
-      wmax(100.),
-      nContours(nMaxContours),
-      nSamples1d(1000),
-      nSamples2dX(200),
-      nSamples2dY(200),
-      electrode(""),
-      canvas(0),
-      hasExternalCanvas(false),
-      fPot(0),
-      fWfield(0),
-      fPotProfile(0) {
-
-  SetDefaultProjection();
-  plottingEngine.SetDefaultStyle();
-}
-
-ViewField::~ViewField() {
-
-  if (!hasExternalCanvas && canvas != 0) delete canvas;
-  if (fPot != 0) delete fPot;
-  if (fWfield != 0) delete fWfield;
-  if (fPotProfile != 0) delete fPotProfile;
-}
+ViewField::ViewField() : ViewBase("ViewField") { }
 
 void ViewField::SetSensor(Sensor* s) {
-
-  if (s == 0) {
-    std::cerr << className << "::SetSensor:\n";
-    std::cerr << "    Sensor pointer is null.\n";
+  if (!s) {
+    std::cerr << m_className << "::SetSensor: Null pointer.\n";
     return;
   }
-
-  sensor = s;
-  component = 0;
-  // Get the bounding box.
-  bool ok = sensor->GetArea(pxmin, pymin, pzmin, pxmax, pymax, pzmax);
-  if (!ok) {
-    std::cerr << className << "::SetSensor:\n";
-    std::cerr << "    Warning: bounding box of sensor is not defined.\n";
-  }
-  // Get the voltage range.
-  ok = sensor->GetVoltageRange(fmin, fmax);
-  if (!ok) {
-    std::cerr << className << "::SetSensor:\n";
-    std::cerr << "    Warning: voltage range of sensor is not defined.\n";
-  }
+  m_sensor = s;
+  m_component = nullptr;
 }
 
-void ViewField::SetComponent(ComponentBase* c) {
-
-  if (c == 0) {
-    std::cerr << className << "::SetComponent:\n";
-    std::cerr << "    Component pointer is null.\n";
+void ViewField::SetComponent(Component* c) {
+  if (!c) {
+    std::cerr << m_className << "::SetComponent: Null pointer.\n";
     return;
   }
-
-  component = c;
-  sensor = 0;
-  // Get the bounding box.
-  bool ok = component->GetBoundingBox(pxmin, pymin, pzmin, pxmax, pymax, pzmax);
-  if (!ok) {
-    std::cerr << className << "::SetComponent:\n";
-    std::cerr << "    Warning: bounding box of component is not defined.\n";
-  }
-  // Get the voltage range.
-  ok = component->GetVoltageRange(fmin, fmax);
-  if (!ok) {
-    std::cerr << className << "::SetComponent:\n";
-    std::cerr << "    Warning: voltage range of component is not defined.\n";
-  }
+  m_component = c;
+  m_sensor = nullptr;
 }
 
-void ViewField::SetCanvas(TCanvas* c) {
-
-  if (c == 0) return;
-  if (!hasExternalCanvas && canvas != 0) {
-    delete canvas;
-    canvas = 0;
-  }
-  canvas = c;
-  hasExternalCanvas = true;
+void ViewField::SetVoltageRange(const double vmin, const double vmax) {
+  m_vmin = std::min(vmin, vmax);
+  m_vmax = std::max(vmin, vmax);
+  m_useAutoRange = false;
 }
 
-void ViewField::SetArea(double xmin, double ymin, double xmax, double ymax) {
-
-  // Check range, assign if non-null
-  if (xmin == xmax || ymin == ymax) {
-    std::cerr << className << "::SetArea:\n";
-    std::cerr << "    Null area range not permitted.\n";
-    std::cerr << "      " << xmin << " < x < " << xmax << "\n";
-    std::cerr << "      " << ymin << " < y < " << ymax << "\n";
-    return;
-  }
-  pxmin = std::min(xmin, xmax);
-  pymin = std::min(ymin, ymax);
-  pxmax = std::max(xmin, xmax);
-  pymax = std::max(ymin, ymax);
+void ViewField::SetElectricFieldRange(const double emin, const double emax) {
+  m_emin = std::min(emin, emax);
+  m_emax = std::max(emin, emax);
+  m_useAutoRange = false;
 }
 
-void ViewField::SetVoltageRange(const double minval, const double maxval) {
-
-  fmin = std::min(minval, maxval);
-  fmax = std::max(minval, maxval);
+void ViewField::SetWeightingFieldRange(const double wmin, const double wmax) {
+  m_wmin = std::min(wmin, wmax);
+  m_wmax = std::max(wmin, wmax);
+  m_useAutoRange = false;
 }
 
-void ViewField::SetElectricFieldRange(const double minval,
-                                      const double maxval) {
-
-  emin = std::min(minval, maxval);
-  emax = std::max(minval, maxval);
+void ViewField::SetMagneticFieldRange(const double bmin, const double bmax) {
+  m_bmin = std::min(bmin, bmax);
+  m_bmax = std::max(bmin, bmax);
+  m_useAutoRange = false;
 }
 
-void ViewField::SetWeightingFieldRange(const double minval,
-                                       const double maxval) {
-
-  wmin = std::min(minval, maxval);
-  wmax = std::max(minval, maxval);
+void ViewField::SetNumberOfContours(const unsigned int n) {
+  if (n > 0) m_nContours = n;
 }
 
-void ViewField::SetNumberOfContours(const int n) {
+void ViewField::SetNumberOfSamples1d(const unsigned int n) {
+  m_nSamples1d = std::max(4u, n);
+}
 
-  if (n <= nMaxContours) {
-    nContours = n;
+void ViewField::SetNumberOfSamples2d(const unsigned int nx,
+                                     const unsigned int ny) {
+  m_nSamples2dX = std::max(4u, nx);
+  m_nSamples2dY = std::max(4u, ny);
+}
+
+void ViewField::PlotContour(const std::string& option) {
+  Draw2d(option, true, false, "", "CONT1Z");
+}
+
+void ViewField::Plot(const std::string& option, const std::string& drawopt) {
+  std::string opt1;
+  std::transform(drawopt.begin(), drawopt.end(), 
+                 std::back_inserter(opt1), toupper);
+  if (opt1.find("CONT") != std::string::npos) {
+    Draw2d(option, true, false, "", drawopt);
   } else {
-    std::cerr << className << "::SetNumberOfContours:\n";
-    std::cerr << "    Max. number of contours is " << nMaxContours << ".\n";
+    Draw2d(option, false, false, "", drawopt);
   }
-}
-
-void ViewField::SetNumberOfSamples1d(const int n) {
-
-  const int nmin = 10;
-  const int nmax = 100000;
-
-  if (n < nmin || n > nmax) {
-    std::cerr << className << "::SetNumberOfSamples1d:\n";
-    std::cerr << "    Number of points (" << n << ") out of range.\n";
-    std::cerr << "    " << nmin << " <= n <= " << nmax << "\n";
-    return;
-  }
-
-  nSamples1d = n;
-}
-
-void ViewField::SetNumberOfSamples2d(const int nx, const int ny) {
-
-  const int nmin = 10;
-  const int nmax = 10000;
-  if (nx < nmin || nx > nmax) {
-    std::cerr << className << "::SetNumberOfSamples2d:\n";
-    std::cerr << "    Number of x-points (" << nx << ") out of range.\n";
-    std::cerr << "    " << nmin << " <= nx <= " << nmax << "\n";
-  } else {
-    nSamples2dX = nx;
-  }
-
-  if (ny < nmin || ny > nmax) {
-    std::cerr << className << "::SetNumberOfSamples2d:\n";
-    std::cerr << "    Number of y-points (" << ny << ") out of range.\n";
-    std::cerr << "    " << nmin << " <= ny <= " << nmax << "\n";
-  } else {
-    nSamples2dY = ny;
-  }
-}
-
-void ViewField::PlotContour(const std::string option) {
-
-  // Setup the canvas
-  if (canvas == 0) {
-    canvas = new TCanvas();
-    canvas->SetTitle("Field View");
-    if (hasExternalCanvas) hasExternalCanvas = false;
-  }
-  canvas->cd();
-  canvas->Range(pxmin, pymin, pxmax, pymax);
-
-  if (fPot == 0) CreateFunction();
-
-  int plotType = 0;
-  if (option == "v" || option == "p" || option == "phi" || option == "volt" ||
-      option == "voltage" || option == "pot" || option == "potential") {
-    fPot->SetParameter(0, -1.);
-    fPot->SetRange(pxmin, pymin, pxmax, pymax);
-    fPot->SetMinimum(fmin);
-    fPot->SetMaximum(fmax);
-  } else if (option == "e" || option == "field") {
-    fPot->SetParameter(0, 1.);
-    plotType = 1;
-    fPot->SetMinimum(emin);
-    fPot->SetMaximum(emax);
-  } else if (option == "ex") {
-    fPot->SetParameter(0, 11.);
-    plotType = 2;
-    fPot->SetMinimum(emin);
-    fPot->SetMaximum(emax);
-  } else if (option == "ey") {
-    fPot->SetParameter(0, 21.);
-    plotType = 3;
-    fPot->SetMinimum(emin);
-    fPot->SetMaximum(emax);
-  } else if (option == "ez") {
-    fPot->SetParameter(0, 31.);
-    plotType = 4;
-    fPot->SetMinimum(emin);
-    fPot->SetMaximum(emax);
-  } else {
-    std::cerr << className << "::PlotContour:\n";
-    std::cerr << "    Unknown option (" << option << ")\n";
-    std::cerr << "    Plotting the potential.\n";
-    fPot->SetParameter(0, -1.);
-    fPot->SetMinimum(fmin);
-    fPot->SetMaximum(fmax);
-  }
-
-  double level[nMaxContours];
-  for (int i = 0; i < nContours; ++i) {
-    if (nContours > 1) {
-      if (plotType == 0) {
-        level[i] = fmin + i * (fmax - fmin) / (nContours - 1.);
-      } else {
-        level[i] = emin + i * (emax - emin) / (nContours - 1.);
-      }
-    } else {
-      if (plotType == 0) {
-        level[i] = (fmax + fmin) / 2.;
-      } else {
-        level[i] = (emax + emin) / 2.;
-      }
-    }
-  }
-  fPot->SetContour(nContours, level);
-
-  if (debug) {
-    std::cout << className << "::PlotContour:\n";
-    std::cout << "    Number of contours: " << nContours << "\n";
-    for (int i = 0; i < nContours; ++i) {
-      std::cout << "        Level " << i << " = " << level[i] << "\n";
-    }
-  }
-  fPot->SetNpx(nSamples2dX);
-  fPot->SetNpy(nSamples2dY);
-  fPot->GetXaxis()->SetTitle(xLabel);
-  fPot->GetYaxis()->SetTitle(yLabel);
-  if (plotType == 0) {
-    fPot->SetTitle("Contours of the potential");
-  } else if (plotType == 1) {
-    fPot->SetTitle("Contours of the electric field");
-  } else if (plotType == 2) {
-    fPot->SetTitle("Contours of the electric field (x-component)");
-  } else if (plotType == 3) {
-    fPot->SetTitle("Contours of the electric field (y-component)");
-  } else if (plotType == 4) {
-    fPot->SetTitle("Contours of the electric field (z-component)");
-  }
-  fPot->Draw("CONT4Z");
-  canvas->Update();
-}
-
-void ViewField::PlotSurface(const std::string option) {
-
-  // Setup the canvas
-  if (canvas == 0) {
-    canvas = new TCanvas();
-    canvas->SetTitle("Field View");
-    if (hasExternalCanvas) hasExternalCanvas = false;
-  }
-  canvas->cd();
-  canvas->Range(pxmin, pymin, pxmax, pymax);
-
-  if (fPot == 0) CreateFunction();
-
-  int plotType = 0;
-  if (option == "v" || option == "p" || option == "phi" || option == "volt" ||
-      option == "voltage" || option == "pot" || option == "potential") {
-    fPot->SetParameter(0, -1.);
-    fPot->SetMinimum(fmin);
-    fPot->SetMinimum(fmax);
-  } else if (option == "e" || option == "field") {
-    fPot->SetParameter(0, 1.);
-    plotType = 1;
-    fPot->SetMinimum(emin);
-    fPot->SetMinimum(emax);
-  } else if (option == "ex") {
-    fPot->SetParameter(0, 11.);
-    plotType = 2;
-    fPot->SetMinimum(emin);
-    fPot->SetMinimum(emax);
-  } else if (option == "ey") {
-    fPot->SetParameter(0, 21.);
-    plotType = 3;
-    fPot->SetMinimum(emin);
-    fPot->SetMinimum(emax);
-  } else if (option == "ez") {
-    fPot->SetParameter(0, 31.);
-    plotType = 4;
-    fPot->SetMinimum(emin);
-    fPot->SetMinimum(emax);
-  } else {
-    std::cerr << className << "::PlotSurface:\n";
-    std::cerr << "    Unknown option (" << option << ")\n";
-    std::cerr << "    Plotting the potential.\n";
-    fPot->SetParameter(0, -1.);
-    fPot->SetMinimum(fmin);
-    fPot->SetMinimum(fmax);
-  }
-  fPot->SetNpx(nSamples2dX);
-  fPot->SetNpy(nSamples2dY);
-  fPot->GetXaxis()->SetTitle(xLabel);
-  fPot->GetYaxis()->SetTitle(yLabel);
-  if (plotType == 0) {
-    fPot->SetTitle("Surface plot of the potential");
-  } else if (plotType == 1) {
-    fPot->SetTitle("Surface plot of the electric field");
-  } else if (plotType == 2) {
-    fPot->SetTitle("Surface plot of the electric field (x-component)");
-  } else if (plotType == 3) {
-    fPot->SetTitle("Surface plot of the electric field (y-component)");
-  } else if (plotType == 4) {
-    fPot->SetTitle("Surface plot of the electric field (z-component)");
-  }
-  fPot->Draw("SURF4");
-  canvas->Update();
 }
 
 void ViewField::PlotProfile(const double x0, const double y0, const double z0,
                             const double x1, const double y1, const double z1,
-                            const std::string option) {
+                            const std::string& option, const bool normalised) {
+  DrawProfile(x0, y0, z0, x1, y1, z1, option, false, "", normalised);
+}
 
-  // Check the distance between the two points.
-  const double d = sqrt(pow(x1 - x0, 2) + pow(y1 - y0, 2) + pow(z1 - z0, 2));
-  if (d <= 0.) {
-    std::cerr << className << "::PlotProfile:\n";
-    std::cerr << "    Start and end point coincide.\n";
+void ViewField::PlotWeightingField(const std::string& label,
+                                   const std::string& option,
+                                   const std::string& drawopt, const double t) {
+  Draw2d(option, false, true, label, drawopt, t);
+}
+
+void ViewField::PlotContourWeightingField(const std::string& label,
+                                          const std::string& option) {
+  Draw2d(option, true, true, label, "CONT1Z");
+}
+
+void ViewField::PlotProfileWeightingField(const std::string& label,
+                                          const double x0, const double y0,
+                                          const double z0, const double x1,
+                                          const double y1, const double z1,
+                                          const std::string& option,
+                                          const bool normalised) {
+  DrawProfile(x0, y0, z0, x1, y1, z1, option, true, label, normalised);
+}
+
+
+ViewField::Parameter ViewField::GetPar(const std::string& option,
+                                       std::string& title, bool& bfield) const {
+
+  bfield = false;
+  std::string opt;
+  std::transform(option.begin(), option.end(), 
+                 std::back_inserter(opt), toupper);
+  if (opt == "BMAG") {
+    title = "field";
+    bfield = true;
+    return Parameter::Bmag;
+  } else if (opt == "BX") {
+    title = "field (x-component)";
+    bfield = true;
+    return Parameter::Bx;
+  } else if (opt == "BY") {
+    title = "field (y-component)";
+    bfield = true;
+    return Parameter::By;
+  } else if (opt == "BZ") {
+    title = "field (z-component)";
+    bfield = true;
+    return Parameter::Bz;
+  } else if (opt == "V" || opt == "P" || opt == "PHI" || 
+      opt.find("VOLT") != std::string::npos ||
+      opt.find("POT") != std::string::npos) {
+    title = "potential";
+    return Parameter::Potential;
+  } else if (opt == "E" || opt == "FIELD" || opt == "NORM" ||
+             opt.find("MAG") != std::string::npos) {
+    title = "field";
+    return Parameter::Emag;
+  } else if (opt.find("X") != std::string::npos) {
+    title = "field (x-component)";
+    return Parameter::Ex;
+  } else if (opt.find("Y") != std::string::npos) {
+    title = "field (y-component)";
+    return Parameter::Ey;
+  } else if (opt.find("Z") != std::string::npos) {
+    title = "field (z-component)";
+    return Parameter::Ez;
+  }
+  std::cerr << m_className << "::GetPar: Unknown option (" << option << ").\n";
+  title = "potential";
+  return Parameter::Potential;
+}
+
+void ViewField::Draw2d(const std::string& option, const bool contour,
+                       const bool wfield, const std::string& electrode,
+                       const std::string& drawopt, const double t) {
+  if (!m_sensor && !m_component) {
+    std::cerr << m_className << "::Draw2d:\n"
+              << "    Neither sensor nor component are defined.\n";
     return;
   }
 
-  // Setup the canvas.
-  if (canvas == 0) {
-    canvas = new TCanvas();
-    canvas->SetTitle("Field View");
-    if (hasExternalCanvas) hasExternalCanvas = false;
-  }
-  canvas->cd();
+  // Determine the x-y range.
+  if (!SetPlotLimits()) return;
 
-  if (fPotProfile == 0) CreateProfileFunction();
+  // Determine the quantity to be plotted.
+  std::string title;
+  bool bfield = false;
+  const Parameter par = GetPar(option, title, bfield);
 
-  fPotProfile->SetParameter(0, x0);
-  fPotProfile->SetParameter(1, y0);
-  fPotProfile->SetParameter(2, z0);
-  fPotProfile->SetParameter(3, x1);
-  fPotProfile->SetParameter(4, y1);
-  fPotProfile->SetParameter(5, z1);
-  int plotType = 0;
-  if (option == "v" || option == "p" || option == "phi" || option == "volt" ||
-      option == "voltage" || option == "pot" || option == "potential") {
-    fPotProfile->SetParameter(6, -1.);
-    fPotProfile->SetMinimum(fmin);
-    fPotProfile->SetMaximum(fmax);
-  } else if (option == "e" || option == "field") {
-    fPotProfile->SetParameter(6, 1.);
-    plotType = 1;
-    fPotProfile->SetMinimum(emin);
-    fPotProfile->SetMaximum(emax);
-  } else if (option == "ex") {
-    fPotProfile->SetParameter(6, 11.);
-    plotType = 2;
-    fPotProfile->SetMinimum(emin);
-    fPotProfile->SetMaximum(emax);
-  } else if (option == "ey") {
-    fPotProfile->SetParameter(6, 21.);
-    plotType = 3;
-    fPotProfile->SetMinimum(emin);
-    fPotProfile->SetMaximum(emax);
-  } else if (option == "ez") {
-    fPotProfile->SetParameter(6, 31.);
-    plotType = 4;
-    fPotProfile->SetMinimum(emin);
-    fPotProfile->SetMaximum(emax);
-  } else {
-    std::cerr << className << "::PlotProfile:\n";
-    std::cerr << "    Unknown option (" << option << ")\n";
-    std::cerr << "    Plotting the potential.\n";
-    fPotProfile->SetParameter(6, -1.);
-    fPotProfile->SetMinimum(fmin);
-    fPotProfile->SetMaximum(fmax);
-  }
-  if (debug) {
-    std::cout << className << "::PlotProfile:\n";
-    if (plotType == 0) {
-      std::cout << "    Plotting potential along\n";
+  auto eval = [this, par, wfield, bfield, electrode, t](double* u, double* /*p*/) {
+      // Transform to global coordinates.
+      const double x = m_proj[0][0] * u[0] + m_proj[1][0] * u[1] + m_proj[2][0];
+      const double y = m_proj[0][1] * u[0] + m_proj[1][1] * u[1] + m_proj[2][1];
+      const double z = m_proj[0][2] * u[0] + m_proj[1][2] * u[1] + m_proj[2][2];
+      return wfield ? Wfield(x, y, z, par, electrode, t) :
+             bfield ? Bfield(x, y, z, par) : Efield(x, y, z, par);
+  };
+  const std::string fname = FindUnusedFunctionName("f2D");
+  TF2 f2(fname.c_str(), eval, m_xMinPlot, m_xMaxPlot, m_yMinPlot, m_yMaxPlot, 0);
+
+  // Set the x-y range.
+  f2.SetRange(m_xMinPlot, m_yMinPlot, m_xMaxPlot, m_yMaxPlot);
+
+  // Set the z-range.
+  double zmin = m_vmin;
+  double zmax = m_vmax;
+  if (wfield) {
+    if (contour) {
+      title = "Contours of the weighting " + title;
     } else {
-      std::cout << "    Plotting field along\n";
+      title = "Weighting " + title;
     }
-    std::cout << "    (" << fPotProfile->GetParameter(0) << ", "
-              << fPotProfile->GetParameter(1) << ", "
-              << fPotProfile->GetParameter(2) << ") - ("
-              << fPotProfile->GetParameter(3) << ", "
-              << fPotProfile->GetParameter(4) << ", "
-              << fPotProfile->GetParameter(5) << ")\n";
-  }
-  fPotProfile->GetXaxis()->SetTitle("normalised distance");
-  if (plotType == 0) {
-    fPotProfile->SetTitle("Profile plot of the potential");
-    fPotProfile->GetYaxis()->SetTitle("potential [V]");
-  } else if (plotType == 1) {
-    fPotProfile->SetTitle("Profile plot of the electric field");
-    fPotProfile->GetYaxis()->SetTitle("field [V/cm]");
-  } else if (plotType == 2) {
-    fPotProfile->SetTitle("Profile plot of the electric field (x-component)");
-    fPotProfile->GetYaxis()->SetTitle("field [V/cm]");
-  } else if (plotType == 3) {
-    fPotProfile->SetTitle("Profile plot of the electric field (y-component)");
-    fPotProfile->GetYaxis()->SetTitle("field [V/cm]");
-  } else if (plotType == 4) {
-    fPotProfile->SetTitle("Profile plot of the electric field (z-component)");
-    fPotProfile->GetYaxis()->SetTitle("field [V/cm]");
-  }
-  fPotProfile->SetNpx(nSamples1d);
-  fPotProfile->Draw();
-  canvas->Update();
-}
-
-void ViewField::PlotSurfaceWeightingField(const std::string label,
-                                          const std::string option) {
-
-  // Setup the canvas
-  if (canvas == 0) {
-    canvas = new TCanvas();
-    canvas->SetTitle("Field View");
-    if (hasExternalCanvas) hasExternalCanvas = false;
-  }
-  canvas->cd();
-  canvas->Range(pxmin, pymin, pxmax, pymax);
-
-  electrode = label;
-
-  if (fWfield == 0) CreateFunctionWeightingField();
-
-  int plotType = 0;
-  if (option == "v" || option == "p" || option == "phi" || option == "volt" ||
-      option == "voltage" || option == "pot" || option == "potential") {
-    fWfield->SetParameter(0, -1.);
-  } else if (option == "e" || option == "field") {
-    fWfield->SetParameter(0, 1.);
-    plotType = 1;
-  } else if (option == "ex") {
-    fWfield->SetParameter(0, 11.);
-    plotType = 2;
-  } else if (option == "ey") {
-    fWfield->SetParameter(0, 21.);
-    plotType = 3;
-  } else if (option == "ez") {
-    fWfield->SetParameter(0, 31.);
-    plotType = 4;
+    if (m_useAutoRange) {
+      SampleRange(m_xMinPlot, m_yMinPlot, m_xMaxPlot, m_yMaxPlot, &f2, 
+                  zmin, zmax);
+    } else if (par == Parameter::Potential) {
+      zmin = 0.;
+      zmax = 1.;
+    } else {
+      zmin = m_wmin;
+      zmax = m_wmax;
+    }
+  } else if (bfield) {
+    if (contour) {
+      title = "Contours of the magnetic " + title;
+    } else {
+      title = "Magnetic " + title;
+    }
+    if (m_useAutoRange) {
+      SampleRange(m_xMinPlot, m_yMinPlot, m_xMaxPlot, m_yMaxPlot, 
+                  &f2, zmin, zmax);
+    } else {
+      zmin = m_bmin;
+      zmax = m_bmax;
+    }
   } else {
-    std::cerr << className << "::PlotSurfaceWeightingField:\n";
-    std::cerr << "    Unknown option (" << option << ")\n";
-    std::cerr << "    Plotting the absolute value of the field.\n";
-    fWfield->SetParameter(0, 1.);
-  }
-  fWfield->SetNpx(nSamples2dX);
-  fWfield->SetNpy(nSamples2dY);
-  fWfield->GetXaxis()->SetTitle(xLabel);
-  fWfield->GetYaxis()->SetTitle(yLabel);
-  if (plotType == 0) {
-    fWfield->SetTitle("Surface plot of the weighting potential");
-  } else if (plotType == 1) {
-    fWfield->SetTitle("Surface plot of the weighting field");
-  } else if (plotType == 2) {
-    fWfield->SetTitle("Surface plot of the weighting field (x-component)");
-  } else if (plotType == 3) {
-    fWfield->SetTitle("Surface plot of the weighting field (y-component)");
-  } else if (plotType == 4) {
-    fWfield->SetTitle("Surface plot of the weighting field (z-component)");
-  }
-  fWfield->Draw("SURF4");
-  canvas->Update();
-}
-
-void ViewField::PlotContourWeightingField(const std::string label,
-                                          const std::string option) {
-
-  // Setup the canvas
-  if (canvas == 0) {
-    canvas = new TCanvas();
-    canvas->SetTitle("Field View");
-    if (hasExternalCanvas) hasExternalCanvas = false;
-  }
-  canvas->cd();
-  canvas->Range(pxmin, pymin, pxmax, pymax);
-
-  electrode = label;
-
-  if (fWfield == 0) CreateFunctionWeightingField();
-
-  int plotType = 0;
-  if (option == "v" || option == "p" || option == "phi" || option == "volt" ||
-      option == "voltage" || option == "pot" || option == "potential") {
-    fWfield->SetParameter(0, -1.);
-  } else if (option == "e" || option == "field") {
-    fWfield->SetParameter(0, 1.);
-    plotType = 1;
-  } else if (option == "ex") {
-    fWfield->SetParameter(0, 11.);
-    plotType = 2;
-  } else if (option == "ey") {
-    fWfield->SetParameter(0, 21.);
-    plotType = 3;
-  } else if (option == "ez") {
-    fWfield->SetParameter(0, 31.);
-    plotType = 4;
-  } else {
-    std::cerr << className << "::PlotContourWeightingField:\n";
-    std::cerr << "    Unknown option (" << option << ")\n";
-    std::cerr << "    Plotting the absolute value of the field.\n";
-    fWfield->SetParameter(0, 1.);
-  }
-  fWfield->SetMinimum(wmin);
-  fWfield->SetMaximum(wmax);
-
-  double level[nMaxContours];
-  for (int i = 0; i < nContours; ++i) {
-    if (nContours > 1) {
-      level[i] = i / (nContours - 1.);
-      if (plotType > 0) {
-        level[i] = wmin + (wmax - wmin) * level[i];
+    if (contour) {
+      title = "Contours of the electric " + title;
+    } else {
+      title = "Electric " + title;
+    }
+    if (par == Parameter::Potential) {
+      if (m_useAutoRange) {
+        if (m_component) {
+          if (m_samplePotential || !m_component->GetVoltageRange(zmin, zmax)) {
+            SampleRange(m_xMinPlot, m_yMinPlot, m_xMaxPlot, m_yMaxPlot, 
+                        &f2, zmin, zmax);
+          }
+        } else if (m_sensor) {
+          if (m_samplePotential || !m_sensor->GetVoltageRange(zmin, zmax)) {
+            SampleRange(m_xMinPlot, m_yMinPlot, m_xMaxPlot, m_yMaxPlot, 
+                        &f2, zmin, zmax);
+          }
+        }
+      } else {
+        zmin = m_vmin;
+        zmax = m_vmax;
       }
     } else {
-      level[i] = 1. / 2.;
-      if (plotType > 0) {
-        level[i] *= (wmax + wmin);
+      if (m_useAutoRange) {
+        SampleRange(m_xMinPlot, m_yMinPlot, m_xMaxPlot, m_yMaxPlot, 
+                    &f2, zmin, zmax);
+      } else {
+        zmin = m_emin;
+        zmax = m_emax;
       }
     }
   }
-  fWfield->SetContour(nContours, level);
+  f2.SetMinimum(zmin);
+  f2.SetMaximum(zmax);
 
-  if (debug) {
-    std::cout << className << "::PlotContour:\n";
-    std::cout << "    Number of contours: " << nContours << "\n";
-    for (int i = 0; i < nContours; ++i) {
-      std::cout << "        Level " << i << " = " << level[i] << "\n";
+  // Set the contours if requested.
+  if (contour) {
+    std::vector<double> level(m_nContours, 0.);
+    if (m_nContours > 1) {
+      const double step = (zmax - zmin) / (m_nContours - 1.);
+      for (unsigned int i = 0; i < m_nContours; ++i) {
+        level[i] = zmin + i * step;
+      }
+    } else {
+      level[0] = 0.5 * (zmax + zmin);
+    }
+    if (m_debug) {
+      std::cout << m_className << "::Draw2d:\n"
+                << "    Number of contours: " << m_nContours << "\n";
+      for (unsigned int i = 0; i < m_nContours; ++i) {
+        std::cout << "        Level " << i << " = " << level[i] << "\n";
+      }
+    }
+    f2.SetContour(m_nContours, level.data());
+  }
+
+  // Set the resolution.
+  f2.SetNpx(m_nSamples2dX);
+  f2.SetNpy(m_nSamples2dY);
+
+  // Set the labels.
+  std::string labels = ";" + LabelX() + ";" + LabelY();
+  f2.SetTitle(labels.c_str());
+
+  auto pad = GetCanvas();
+  pad->cd();
+  pad->SetTitle(title.c_str());
+  f2.DrawCopy(drawopt.c_str());
+  gPad->SetRightMargin(0.15);
+  gPad->Update();
+}
+
+void ViewField::DrawProfile(const double x0, const double y0, const double z0,
+                            const double x1, const double y1, const double z1,
+                            const std::string& option, 
+                            const bool wfield, const std::string& electrode,
+                            const bool normalised) {
+  if (!m_sensor && !m_component) {
+    std::cerr << m_className << "::DrawProfile:\n"
+              << "    Neither sensor nor component are defined.\n";
+    return;
+  }
+
+  // Check the distance between the two points.
+  double dx = x1 - x0;
+  double dy = y1 - y0;
+  double dz = z1 - z0;
+  if (dx * dx + dy * dy + dz * dz <= 0.) {
+    std::cerr << m_className << "::DrawProfile:\n"
+              << "    Start and end points coincide.\n";
+    return;
+  }
+
+  // Determine the quantity to be plotted.
+  std::string title;
+  bool bfield = false;
+  const Parameter par = GetPar(option, title, bfield);
+
+  double t0 = 0.;
+  double t1 = 1.;
+  unsigned int dir = 3;
+  if (fabs(dy) + fabs(dz) < 1.e-6 * fabs(dx)) {
+    t0 = x0;
+    t1 = x1;
+    dir = 0;
+  } else if (fabs(dx) + fabs(dz) < 1.e-6 * fabs(dy)) {
+    t0 = y0;
+    t1 = y1;
+    dir = 1;
+  } else if (fabs(dx) + fabs(dy) < 1.e-6 * fabs(dz)) {
+    t0 = z0;
+    t1 = z1;
+    dir = 2;
+  } else if (!normalised) {
+    t1 = sqrt(dx * dx + dy * dy + dz * dz);
+    dx /= t1;
+    dy /= t1;
+    dz /= t1; 
+  }
+
+  auto eval = [this, par, wfield, bfield, electrode, dir, 
+               x0, y0, z0, dx, dy, dz](double* u, double* /*p*/) {
+    // Get the position.
+    const double t = u[0];
+    double x = dir == 0 ? t : x0;
+    double y = dir == 1 ? t : y0;
+    double z = dir == 2 ? t : z0;
+    if (dir > 2) {
+      x += t * dx;
+      y += t * dy;
+      z += t * dz;
+    }
+    return wfield ? Wfield(x, y, z, par, electrode) : 
+           bfield ? Bfield(x, y, z, par) : Efield(x, y, z, par);
+  };
+
+  const std::string fname = FindUnusedFunctionName("fProfile");
+  TF1 f1(fname.c_str(), eval, t0, t1, 0);
+
+  double fmin = m_vmin;
+  double fmax = m_vmax;
+  if (wfield) {
+    title = "weighting " + title;
+    if (par == Parameter::Potential) {
+      if (m_useAutoRange && m_samplePotential) {
+        SampleRange(&f1, fmin, fmax);
+      } else {
+        fmin = 0.;
+        fmax = 1.;
+      }
+    } else {
+      if (m_useAutoRange) {
+        SampleRange(&f1, fmin, fmax);
+      } else {
+        fmin = m_wmin;
+        fmax = m_wmax;
+      }
+    }
+  } else if (bfield) {
+    title = "magnetic " + title;
+    if (m_useAutoRange) {
+      SampleRange(&f1, fmin, fmax);
+    } else {
+      fmin = m_bmin;
+      fmax = m_bmax;
+    }
+  } else {
+    title = "electric " + title;
+    if (par == Parameter::Potential) {
+      if (m_useAutoRange) {
+        if (m_component) {
+          if (m_samplePotential || !m_component->GetVoltageRange(fmin, fmax)) {
+            SampleRange(&f1, fmin, fmax);
+          }
+        } else if (m_sensor) {
+          if (m_samplePotential || !m_sensor->GetVoltageRange(fmin, fmax)) {
+            SampleRange(&f1, fmin, fmax);
+          }
+        }
+      } else {
+        fmin = m_vmin;
+        fmax = m_vmax;
+      }
+    } else {
+      if (m_useAutoRange) {
+        SampleRange(&f1, fmin, fmax);
+      } else {
+        fmin = m_emin;
+        fmax = m_emax;
+      }
     }
   }
-  fWfield->SetNpx(nSamples2dX);
-  fWfield->SetNpy(nSamples2dY);
-  fWfield->GetXaxis()->SetTitle(xLabel);
-  fWfield->GetYaxis()->SetTitle(yLabel);
-  if (plotType == 0) {
-    fWfield->SetTitle("Contours of the weighting potential");
-  } else if (plotType == 1) {
-    fWfield->SetTitle("Contours of the weighting field");
-  } else if (plotType == 2) {
-    fWfield->SetTitle("Contours of the weighting field (x-component)");
-  } else if (plotType == 3) {
-    fWfield->SetTitle("Contours of the weighting field (y-component)");
-  } else if (plotType == 4) {
-    fWfield->SetTitle("Contours of the weighting field (z-component)");
+  f1.SetMinimum(fmin);
+  f1.SetMaximum(fmax);
+
+  std::string labels = ";normalised distance;";
+  if (dir == 0) {
+    labels = ";#it{x} [cm];";
+  } else if (dir == 1) {
+    labels = ";#it{y} [cm];";
+  } else if (dir == 2) {
+    labels = ";#it{z} [cm];";
+  } else if (!normalised) {
+    labels = ";distance [cm];";
   }
-  fWfield->Draw("CONT4Z");
-  canvas->Update();
-}
-
-void ViewField::CreateFunction() {
-
-  int idx = 0;
-  std::string fname = "fPotential_0";
-  while (gROOT->GetListOfFunctions()->FindObject(fname.c_str())) {
-    ++idx;
-    std::stringstream ss;
-    ss << "fPotential_";
-    ss << idx;
-    fname = ss.str();
+  if (bfield) {
+    labels += "#it{B}";
+    if (par == Parameter::Bx) {
+      labels += "_{x}";
+    } else if (par == Parameter::By) {
+      labels += "_{y}";
+    } else if (par == Parameter::Bz) {
+      labels += "_{z}";
+    }
+    labels += " [T]";
+  } else if (par == Parameter::Potential) {
+    labels += "#phi";
+    if (wfield) {
+      labels += "_w";
+    } else {
+      labels += " [V]";
+    }
+  } else {
+    labels += "#it{E}";
+    if (wfield) {
+      labels += "_{w";
+      if (par != Parameter::Emag) labels += ",";
+    } else if (par != Parameter::Emag) {
+      labels += "_{";
+    }
+    if (par == Parameter::Ex) {
+      labels += "x";
+    } else if (par == Parameter::Ey) {
+      labels += "y";
+    } else if (par == Parameter::Ez) {
+      labels += "z";
+    }
+    if (wfield || par != Parameter::Emag) labels += "}";
+    if (wfield) {
+      labels += " [1/cm]";
+    } else {
+      labels += " [V/cm]";
+    }
   }
+  f1.SetTitle(labels.c_str());
+  f1.SetNpx(m_nSamples1d);
 
-  fPot = new TF2(fname.c_str(), this, &ViewField::EvaluatePotential, pxmin,
-                 pxmax, pymin, pymax, 1, "ViewField", "EvaluatePotential");
+  auto pad = GetCanvas();
+  pad->cd();
+  title = "Profile plot of the " + title;
+  pad->SetTitle(title.c_str());
+  f1.DrawCopy();
+  gPad->Update();
 }
 
-void ViewField::CreateProfileFunction() {
+bool ViewField::SetPlotLimits() {
 
-  int idx = 0;
-  std::string fname = "fPotentialProfile_0";
-  while (gROOT->GetListOfFunctions()->FindObject(fname.c_str())) {
-    ++idx;
-    std::stringstream ss;
-    ss << "fPotentialProfile_";
-    ss << idx;
-    fname = ss.str();
+  if (m_userPlotLimits) return true;
+  double xmin = 0., ymin = 0., xmax = 0., ymax = 0.;
+  if (m_userBox) {
+    if (PlotLimitsFromUserBox(xmin, ymin, xmax, ymax)) {
+      m_xMinPlot = xmin;
+      m_xMaxPlot = xmax;
+      m_yMinPlot = ymin;
+      m_yMaxPlot = ymax;
+      return true;
+    } 
   }
+  // Try to get the area/bounding box from the sensor/component.
+  bool ok = false;
 
-  const int nParameters = 7;
-  fPotProfile =
-      new TF1(fname.c_str(), this, &ViewField::EvaluatePotentialProfile, 0., 1.,
-              nParameters, "ViewField", "EvaluatePotentialProfile");
-}
-
-void ViewField::CreateFunctionWeightingField() {
-
-  int idx = 0;
-  std::string fname = "fWfield_0";
-  while (gROOT->GetListOfFunctions()->FindObject(fname.c_str())) {
-    ++idx;
-    std::stringstream ss;
-    ss << "fWfield_";
-    ss << idx;
-    fname = ss.str();
+  if (m_sensor) {
+    ok = PlotLimits(m_sensor, xmin, ymin, xmax, ymax);
+  } else {
+    ok = PlotLimits(m_component, xmin, ymin, xmax, ymax);
+  } 
+  if (ok) {
+    m_xMinPlot = xmin;
+    m_xMaxPlot = xmax;
+    m_yMinPlot = ymin;
+    m_yMaxPlot = ymax;
   }
-
-  fWfield =
-      new TF2(fname.c_str(), this, &ViewField::EvaluateWeightingField, pxmin,
-              pxmax, pymin, pymax, 1, "ViewField", "EvaluateWeightingField");
+  return ok;
 }
 
-void ViewField::SetDefaultProjection() {
-
-  // Default projection: x-y at z=0
-  project[0][0] = 1;
-  project[1][0] = 0;
-  project[2][0] = 0;
-  project[0][1] = 0;
-  project[1][1] = 1;
-  project[2][1] = 0;
-  project[0][2] = 0;
-  project[1][2] = 0;
-  project[2][2] = 0;
-
-  // Plane description
-  plane[0] = 0;
-  plane[1] = 0;
-  plane[2] = 1;
-  plane[3] = 0;
-
-  // Prepare axis labels.
-  Labels();
-}
-
-double ViewField::EvaluatePotential(double* pos, double* par) {
-
-  if (sensor == 0 && component == 0) return 0.;
+double ViewField::Efield(const double x, const double y, const double z,
+                         const Parameter par) const {
 
   // Compute the field.
   double ex = 0., ey = 0., ez = 0., volt = 0.;
   int status = 0;
-  Medium* medium;
-  const double xpos =
-      project[0][0] * pos[0] + project[1][0] * pos[1] + project[2][0];
-  const double ypos =
-      project[0][1] * pos[0] + project[1][1] * pos[1] + project[2][1];
-  const double zpos =
-      project[0][2] * pos[0] + project[1][2] * pos[1] + project[2][2];
-
-  if (sensor == 0) {
-    component->ElectricField(xpos, ypos, zpos, ex, ey, ez, volt, medium,
-                             status);
+  Medium* medium = nullptr;
+  if (!m_sensor) {
+    m_component->ElectricField(x, y, z, ex, ey, ez, volt, medium, status);
   } else {
-    sensor->ElectricField(xpos, ypos, zpos, ex, ey, ez, volt, medium, status);
+    m_sensor->ElectricField(x, y, z, ex, ey, ez, volt, medium, status);
   }
-  if (debug) {
-    std::cout << className << "::EvaluatePotential:\n";
-    std::cout << "    At (u, v) = (" << pos[0] << ", " << pos[1] << "), "
-              << " (x,y,z) = (" << xpos << "," << ypos << "," << zpos << ")\n";
-    std::cout << "    E = " << ex << ", " << ey << ", " << ez
-              << "), V = " << volt << ", status = " << status << "\n";
+  if (m_useStatus && status != 0) return m_vBkg;
+  switch (par) {
+    case Parameter::Potential:
+      return volt;
+    case Parameter::Emag:
+      return sqrt(ex * ex + ey * ey + ez * ez);
+    case Parameter::Ex:
+      return ex;
+    case Parameter::Ey:
+      return ey;
+    case Parameter::Ez:
+      return ez;
+    default:
+      break;
   }
-
-  if (useStatus && status != 0) return vBkg;
-
-  // Select the quantity to be plotted.
-  if (par[0] > 30.) {
-    return ez;
-  } else if (par[0] > 20.) {
-    return ey;
-  } else if (par[0] > 10.) {
-    return ex;
-  } else if (par[0] > 0.) {
-    return sqrt(ex * ex + ey * ey + ez * ez);
-  }
-  // Return the potential.
   return volt;
 }
 
-double ViewField::EvaluatePotentialProfile(double* pos, double* par) {
+double ViewField::Wfield(const double x, const double y, const double z,
+                         const Parameter par,
+                         const std::string& electrode, const double t) const {
 
-  if (sensor == 0 && component == 0) return 0.;
+  if (par == Parameter::Potential) {
+    double v = 0.;
+    if (m_sensor) {
+      v = m_sensor->WeightingPotential(x, y, z, electrode);
+      if (t > 0.) {
+        v += m_sensor->DelayedWeightingPotential(x, y, z, t, electrode);
+      }
+    } else {
+      v = m_component->WeightingPotential(x, y, z, electrode);
+      if (t > 0.) {
+        v += m_component->DelayedWeightingPotential(x, y, z, t, electrode);
+      }
+    }
+    return std::max(0., v);
+  }
+  // TODO: delayed component.
+  double ex = 0., ey = 0., ez = 0.;
+  if (!m_sensor) {
+    m_component->WeightingField(x, y, z, ex, ey, ez, electrode);
+  } else {
+    m_sensor->WeightingField(x, y, z, ex, ey, ez, electrode);
+  }
 
-  // Get the start and end position.
-  const double x0 = par[0];
-  const double y0 = par[1];
-  const double z0 = par[2];
-  const double x1 = par[3];
-  const double y1 = par[4];
-  const double z1 = par[5];
-  // Compute the direction.
-  const double dx = x1 - x0;
-  const double dy = y1 - y0;
-  const double dz = z1 - z0;
-  // Get the position.
-  const double t = pos[0];
+  switch (par) {
+    case Parameter::Emag:
+      return sqrt(ex * ex + ey * ey + ez * ez);
+    case Parameter::Ex:
+      return ex;
+    case Parameter::Ey:
+      return ey;
+    case Parameter::Ez:
+      return ez;
+    default:
+      break;
+  }
+  return 0.;
+} 
+
+double ViewField::Bfield(const double x, const double y, const double z,
+                         const Parameter par) const {
 
   // Compute the field.
-  double ex = 0., ey = 0., ez = 0., volt = 0.;
+  double bx = 0., by = 0., bz = 0.;
   int status = 0;
-  Medium* medium;
-
-  if (sensor == 0) {
-    component->ElectricField(x0 + t * dx, y0 + t * dy, z0 + t * dz, ex, ey, ez,
-                             volt, medium, status);
+  if (!m_sensor) {
+    m_component->MagneticField(x, y, z, bx, by, bz, status);
   } else {
-    sensor->ElectricField(x0 + t * dx, y0 + t * dy, z0 + t * dz, ex, ey, ez,
-                          volt, medium, status);
+    m_sensor->MagneticField(x, y, z, bx, by, bz, status);
   }
-
-  if (useStatus && status != 0) volt = vBkg;
-
-  // Select the quantity to be plotted.
-  if (par[6] > 30.) {
-    return ez;
-  } else if (par[6] > 20.) {
-    return ey;
-  } else if (par[6] > 10.) {
-    return ex;
-  } else if (par[6] > 0.) {
-    return sqrt(ex * ex + ey * ey + ez * ez);
+  if (m_useStatus && status != 0) return 0.;
+  switch (par) {
+    case Parameter::Bmag:
+      return sqrt(bx * bx + by * by + bz * bz);
+    case Parameter::Bx:
+      return bx;
+    case Parameter::By:
+      return by;
+    case Parameter::Bz:
+      return bz;
+    default:
+      break;
   }
-  // Return the potential.
-  return volt;
+  return 0.;
 }
 
-double ViewField::EvaluateWeightingField(double* pos, double* par) {
+void ViewField::PlotFieldLines(const std::vector<double>& x0,
+                               const std::vector<double>& y0,
+                               const std::vector<double>& z0,
+                               const bool electron, const bool axis,
+                               const short col) {
+  
+  if (x0.empty() || y0.empty() || z0.empty()) return;
+  const size_t nLines = x0.size();
+  if (y0.size() != nLines || z0.size() != nLines) {
+    std::cerr << m_className << "::PlotLines:\n"
+              << "    Mismatch in number of x/y/z coordinates.\n";
+    return;
+  }
 
-  if (sensor == 0 && component == 0) return 0.;
+  if (!m_sensor && !m_component) {
+    std::cerr << m_className << "::PlotFieldLines:\n"
+              << "    Neither sensor nor component are defined.\n";
+    return;
+  }
 
-  // Compute the field.
-  double ex = 0., ey = 0., ez = 0., v = 0.;
-  const double xpos =
-      project[0][0] * pos[0] + project[1][0] * pos[1] + project[2][0];
-  const double ypos =
-      project[0][1] * pos[0] + project[1][1] * pos[1] + project[2][1];
-  const double zpos =
-      project[0][2] * pos[0] + project[1][2] * pos[1] + project[2][2];
+  auto pad = GetCanvas();
+  pad->cd();
+  pad->SetTitle("Field lines");
+  // Determine the x-y range.
+  const bool rangeSet = RangeSet(pad);
+  if (axis || !rangeSet) {
+    // Determine the plot limits.
+    if (!SetPlotLimits()) {
+      std::cerr << m_className << "::PlotFieldLines:\n"
+                << "     Could not determine the plot limits.\n";
+      return;
+    }
+  }
+  if (axis) {
+    auto frame = pad->DrawFrame(m_xMinPlot, m_yMinPlot,
+                                m_xMaxPlot, m_yMaxPlot);
+    frame->GetXaxis()->SetTitle(LabelX().c_str());
+    frame->GetYaxis()->SetTitle(LabelY().c_str());
+    pad->Update();
+  } else if (!rangeSet) {
+    SetRange(pad, m_xMinPlot, m_yMinPlot, m_xMaxPlot, m_yMaxPlot);
+  } 
 
-  if (sensor == 0) {
-    if (par[0] > 0.) {
-      component->WeightingField(xpos, ypos, zpos, ex, ey, ez, electrode);
+  DriftLineRKF drift;
+  Sensor sensor;
+  if (m_sensor) {
+    drift.SetSensor(m_sensor);
+  } else {
+    double xmin = 0., ymin = 0., zmin = 0.;
+    double xmax = 0., ymax = 0., zmax = 0.;
+    if (!m_component->GetBoundingBox(xmin, ymin, zmin, xmax, ymax, zmax)) {
+      if (m_userBox) {
+        sensor.SetArea(m_xMinBox, m_yMinBox, m_zMinBox, 
+                       m_xMaxBox, m_yMaxBox, m_zMaxBox);
+      }
+    }
+    sensor.AddComponent(m_component);
+    drift.SetSensor(&sensor);
+  }
+  const double lx = 0.01 * fabs(m_xMaxPlot - m_xMinPlot);
+  const double ly = 0.01 * fabs(m_yMaxPlot - m_yMinPlot);
+  drift.SetMaximumStepSize(std::min(lx, ly));
+  for (size_t i = 0; i < nLines; ++i) {
+    std::vector<std::array<float, 3> > xl;
+    if (!drift.FieldLine(x0[i], y0[i], z0[i], xl, electron)) continue;
+    DrawLine(xl, col, 1);
+  }
+  pad->Update();
+}
+
+bool ViewField::EqualFluxIntervals(
+    const double x0, const double y0, const double z0,
+    const double x1, const double y1, const double z1,
+    std::vector<double>& xf, std::vector<double>& yf,
+    std::vector<double>& zf,
+    const unsigned int nPoints) const {
+
+  if (nPoints < 2) {
+    std::cerr << m_className << "::EqualFluxIntervals:\n"
+              << "    Number of flux lines must be > 1.\n";
+    return false;
+  }
+
+  // Set integration intervals.
+  constexpr unsigned int nV = 5;
+  // Compute the inplane vector normal to the track.
+  const double xp = (y1 - y0) * m_plane[2] - (z1 - z0) * m_plane[1];
+  const double yp = (z1 - z0) * m_plane[0] - (x1 - x0) * m_plane[2];
+  const double zp = (x1 - x0) * m_plane[1] - (y1 - y0) * m_plane[0];
+  // Compute the total flux, accepting positive and negative parts.
+  double q = 0.;
+  if (m_component) {
+    q = m_component->IntegrateFluxLine(x0, y0, z0, x1, y1, z1, 
+                                       xp, yp, zp, 20 * nV, 0);
+  } else {
+    q = m_sensor->IntegrateFluxLine(x0, y0, z0, x1, y1, z1, 
+                                    xp, yp, zp, 20 * nV, 0);
+  }
+  const int isign = q > 0 ? +1 : -1;
+  if (m_debug) {
+    std::cout << m_className << "::EqualFluxIntervals:\n";
+    std::printf("    Total flux: %15.e8\n", q);
+  }
+  // Compute the 1-sided flux in a number of steps.
+  double fsum = 0.;
+  unsigned int nOtherSign = 0;
+  double s0 = -1.;
+  double s1 = -1.;
+  constexpr size_t nSteps = 1000;
+  std::array<double, nSteps> sTab;
+  std::array<double, nSteps> fTab;
+  constexpr double ds = 1. / nSteps;
+  const double dx = (x1 - x0) * ds;
+  const double dy = (y1 - y0) * ds;
+  const double dz = (z1 - z0) * ds;
+  for (size_t i = 0; i < nSteps; ++i) {
+    const double x = x0 + i * dx;
+    const double y = y0 + i * dy;
+    const double z = z0 + i * dz;
+    if (m_component) {
+      q = m_component->IntegrateFluxLine(x, y, z, x + dx, y + dy, z + dz, 
+                                         xp, yp, zp, nV, isign);
     } else {
-      v = component->WeightingPotential(xpos, ypos, zpos, electrode);
+      q = m_sensor->IntegrateFluxLine(x, y, z, x + dx, y + dy, z + dz, 
+                                      xp, yp, zp, nV, isign);
     }
+    sTab[i] = (i + 1) * ds;
+    if (q > 0) {
+      fsum += q;
+      if (s0 < -0.5) s0 = i * ds;
+      s1 = (i + 1) * ds;
+    }
+    if (q < 0) ++nOtherSign;
+    fTab[i] = fsum;
+  }
+  if (m_debug) {
+    std::printf("    Used flux: %15.8e V. Start: %10.3f End: %10.3f\n",
+                fsum, s0, s1);
+  }
+  // Make sure that the sum is positive.
+  if (fsum <= 0) {
+    std::cerr << m_className << "::EqualFluxIntervals:\n"
+              << "    1-Sided flux integral is not > 0.\n";
+    return false;
+  } else if (s0 < -0.5 || s1 < -0.5 || s1 <= s0) {
+    std::cerr << m_className << "::EqualFluxIntervals:\n"
+              << "    No flux interval without sign change found.\n";
+    return false;
+  } else if (nOtherSign > 0) {
+    std::cerr << m_className << "::EqualFluxIntervals:\n"
+              << " The flux changes sign over the line.\n";
+  }
+  // Normalise the flux.
+  const double scale = (nPoints - 1) / fsum;
+  for (size_t i = 0; i < nSteps; ++i) fTab[i] *= scale;
+
+  // Compute new cluster position.
+  for (size_t i = 0; i < nPoints; ++i) {
+    double s = std::min(s1, std::max(s0, Interpolate(sTab, fTab, i)));
+    xf.push_back(x0 + s * (x1 - x0));
+    yf.push_back(y0 + s * (y1 - y0));
+    zf.push_back(z0 + s * (z1 - z0));
+  }
+  return true;
+}
+
+bool ViewField::FixedFluxIntervals(
+    const double x0, const double y0, const double z0,
+    const double x1, const double y1, const double z1,
+    std::vector<double>& xf, std::vector<double>& yf,
+    std::vector<double>& zf, const double interval) const {
+
+  if (interval <= 0.) {
+    std::cerr << m_className << "::FixedFluxIntervals:\n"
+              << "    Flux interval must be > 0.\n";
+    return false;
+  }
+
+  // Set integration intervals.
+  constexpr unsigned int nV = 5;
+  // Compute the inplane vector normal to the track.
+  const double xp = (y1 - y0) * m_plane[2] - (z1 - z0) * m_plane[1];
+  const double yp = (z1 - z0) * m_plane[0] - (x1 - x0) * m_plane[2];
+  const double zp = (x1 - x0) * m_plane[1] - (y1 - y0) * m_plane[0];
+  // Compute the total flux, accepting positive and negative parts.
+  double q = 0.;
+  if (m_component) {
+    q = m_component->IntegrateFluxLine(x0, y0, z0, x1, y1, z1, 
+                                       xp, yp, zp, 20 * nV, 0);
   } else {
-    if (par[0] > 0.) {
-      sensor->WeightingField(xpos, ypos, zpos, ex, ey, ez, electrode);
+    q = m_sensor->IntegrateFluxLine(x0, y0, z0, x1, y1, z1, 
+                                    xp, yp, zp, 20 * nV, 0);
+  }
+  const int isign = q > 0 ? +1 : -1;
+  if (m_debug) {
+    std::cout << m_className << "::FixedFluxIntervals:\n";
+    std::printf("    Total flux: %15.8e V\n", q);
+  }
+  // Compute the 1-sided flux in a number of steps.
+  double fsum = 0.;
+  unsigned int nOtherSign = 0;
+  double s0 = -1.;
+  constexpr size_t nSteps = 1000;
+  std::array<double, nSteps> sTab;
+  std::array<double, nSteps> fTab;
+  constexpr double ds = 1. / nSteps;
+  const double dx = (x1 - x0) * ds;
+  const double dy = (y1 - y0) * ds;
+  const double dz = (z1 - z0) * ds;
+  for (size_t i = 0; i < nSteps; ++i) {
+    const double x = x0 + i * dx;
+    const double y = y0 + i * dy;
+    const double z = z0 + i * dz;
+    if (m_component) {
+      q = m_component->IntegrateFluxLine(x, y, z, x + dx, y + dy, z + dz, 
+                                         xp, yp, zp, nV, isign);
     } else {
-      v = sensor->WeightingPotential(xpos, ypos, zpos, electrode);
+      q = m_sensor->IntegrateFluxLine(x, y, z, x + dx, y + dy, z + dz, 
+                                      xp, yp, zp, nV, isign);
     }
-  }
-  if (debug) {
-    std::cout << className << "::EvaluateWeightingField:\n";
-    std::cout << "    At (u, v) = (" << pos[0] << ", " << pos[1] << "), "
-              << " (x, y, z) = (" << xpos << "," << ypos << "," << zpos
-              << ")\n";
-    if (par[0] > 0.) {
-      std::cout << "    E = (" << ex << ", " << ey << ", " << ez << ")\n";
-    } else {
-      std::cout << "    V = " << v << "\n";
+    sTab[i] = (i + 1) * ds;
+    if (q > 0) {
+      fsum += q;
+      if (s0 < -0.5) s0 = i * ds;
     }
+    if (q < 0) ++nOtherSign;
+    fTab[i] = fsum;
   }
-
-  // Select the quantity to be plotted.
-  if (par[0] < 0.) {
-    return v;
-  } else if (par[0] > 30.) {
-    return ez;
-  } else if (par[0] > 20.) {
-    return ey;
-  } else if (par[0] > 10.) {
-    return ex;
-  } else {
-    return sqrt(ex * ex + ey * ey + ez * ez);
+  // Make sure that the sum is positive.
+  if (m_debug) {
+    std::printf("    Used flux: %15.8e V. Start offset: %10.3f\n", fsum, s0);
   }
-}
-
-void ViewField::Labels() {
-
-  // Initialisation of the x-axis label
-  strcpy(xLabel, "\0");
-  char buf[100];
-
-  // x portion
-  if (fabs(project[0][0] - 1) < 1.0e-4) {
-    strcat(xLabel, "x");
-  } else if (fabs(project[0][0] + 1) < 1.0e-4) {
-    strcat(xLabel, "-x");
-  } else if (project[0][0] > 1.0e-4) {
-    sprintf(buf, "%g x", project[0][0]);
-    strcat(xLabel, buf);
-  } else if (project[0][0] < -1.0e-4) {
-    sprintf(buf, "%g x", project[0][0]);
-    strcat(xLabel, buf);
+  if (fsum <= 0) {
+    std::cerr << m_className << "::FixedFluxIntervals:\n"
+              << "    1-Sided flux integral is not > 0.\n";
+    return false;
+  } else if (s0 < -0.5) {
+    std::cerr << m_className << "::FixedFluxIntervals:\n"
+              << "    No flux interval without sign change found.\n";
+    return false;
+  } else if (nOtherSign > 0) {
+    std::cerr << m_className << "::FixedFluxIntervals:\n"
+              << "    Warning: The flux changes sign over the line.\n";
   }
 
-  // y portion
-  if (strlen(xLabel) > 0) {
-    if (project[0][1] < -1.0e-4) {
-      strcat(xLabel, " - ");
-    } else if (project[0][1] > 1.0e-4) {
-      strcat(xLabel, " + ");
-    }
-    if (fabs(project[0][1] - 1) < 1.0e-4 || fabs(project[0][1] + 1) < 1.0e-4) {
-      strcat(xLabel, "y");
-    } else if (fabs(project[0][1]) > 1.0e-4) {
-      sprintf(buf, "%g y", fabs(project[0][1]));
-      strcat(xLabel, buf);
-    }
-  } else {
-    if (fabs(project[0][1] - 1) < 1.0e-4) {
-      strcat(xLabel, "y");
-    } else if (fabs(project[0][1] + 1) < 1.0e-4) {
-      strcat(xLabel, "-y");
-    } else if (project[0][1] > 1.0e-4) {
-      sprintf(buf, "%g y", project[0][1]);
-      strcat(xLabel, buf);
-    } else if (project[0][1] < -1.0e-4) {
-      sprintf(buf, "%g y", project[0][1]);
-      strcat(xLabel, buf);
-    }
+  double f = 0.;
+  while (f < fsum) {
+    const double s = Interpolate(sTab, fTab, f);
+    f += interval;
+    xf.push_back(x0 + s * (x1 - x0));
+    yf.push_back(y0 + s * (y1 - y0));
+    zf.push_back(z0 + s * (z1 - z0));
   }
-
-  // z portion
-  if (strlen(xLabel) > 0) {
-    if (project[0][2] < -1.0e-4) {
-      strcat(xLabel, " - ");
-    } else if (project[0][2] > 1.0e-4) {
-      strcat(xLabel, " + ");
-    }
-    if (fabs(project[0][2] - 1) < 1.0e-4 || fabs(project[0][2] + 1) < 1.0e-4) {
-      strcat(xLabel, "z");
-    } else if (fabs(project[0][2]) > 1.0e-4) {
-      sprintf(buf, "%g z", fabs(project[0][2]));
-      strcat(xLabel, buf);
-    }
-  } else {
-    if (fabs(project[0][2] - 1) < 1.0e-4) {
-      strcat(xLabel, "z");
-    } else if (fabs(project[0][2] + 1) < 1.0e-4) {
-      strcat(xLabel, "-z");
-    } else if (project[0][2] > 1.0e-4) {
-      sprintf(buf, "%g z", project[0][2]);
-      strcat(xLabel, buf);
-    } else if (project[0][2] < -1.0e-4) {
-      sprintf(buf, "%g z", project[0][2]);
-      strcat(xLabel, buf);
-    }
-  }
-
-  // Unit
-  strcat(xLabel, " [cm]");
-
-  // Initialisation of the y-axis label
-  strcpy(yLabel, "\0");
-
-  // x portion
-  if (fabs(project[1][0] - 1) < 1.0e-4) {
-    strcat(yLabel, "x");
-  } else if (fabs(project[1][0] + 1) < 1.0e-4) {
-    strcat(yLabel, "-x");
-  } else if (project[1][0] > 1.0e-4) {
-    sprintf(buf, "%g x", project[1][0]);
-    strcat(yLabel, buf);
-  } else if (project[1][0] < -1.0e-4) {
-    sprintf(buf, "%g x", project[1][0]);
-    strcat(yLabel, buf);
-  }
-
-  // y portion
-  if (strlen(yLabel) > 0) {
-    if (project[1][1] < -1.0e-4) {
-      strcat(yLabel, " - ");
-    } else if (project[1][1] > 1.0e-4) {
-      strcat(yLabel, " + ");
-    }
-    if (fabs(project[1][1] - 1) < 1.0e-4 || fabs(project[1][1] + 1) < 1.0e-4) {
-      strcat(yLabel, "y");
-    } else if (fabs(project[1][1]) > 1.0e-4) {
-      sprintf(buf, "%g y", fabs(project[1][1]));
-      strcat(yLabel, buf);
-    }
-  } else {
-    if (fabs(project[1][1] - 1) < 1.0e-4) {
-      strcat(yLabel, "y");
-    } else if (fabs(project[1][1] + 1) < 1.0e-4) {
-      strcat(yLabel, "-y");
-    } else if (project[1][1] > 1.0e-4) {
-      sprintf(buf, "%g y", project[1][1]);
-      strcat(yLabel, buf);
-    } else if (project[1][1] < -1.0e-4) {
-      sprintf(buf, "%g y", project[1][1]);
-      strcat(yLabel, buf);
-    }
-  }
-
-  // z portion
-  if (strlen(yLabel) > 0) {
-    if (project[1][2] < -1.0e-4) {
-      strcat(yLabel, " - ");
-    } else if (project[1][2] > 1.0e-4) {
-      strcat(yLabel, " + ");
-    }
-    if (fabs(project[1][2] - 1) < 1.0e-4 || fabs(project[1][2] + 1) < 1.0e-4) {
-      strcat(yLabel, "z");
-    } else if (fabs(project[1][2]) > 1.0e-4) {
-      sprintf(buf, "%g z", fabs(project[1][2]));
-      strcat(yLabel, buf);
-    }
-  } else {
-    if (fabs(project[1][2] - 1) < 1.0e-4) {
-      strcat(yLabel, "z");
-    } else if (fabs(project[1][2] + 1) < 1.0e-4) {
-      strcat(yLabel, "-z");
-    } else if (project[1][2] > 1.0e-4) {
-      sprintf(buf, "%g z", project[1][2]);
-      strcat(yLabel, buf);
-    } else if (project[1][2] < -1.0e-4) {
-      sprintf(buf, "%g z", project[1][2]);
-      strcat(yLabel, buf);
-    }
-  }
-
-  // Unit
-  strcat(yLabel, " [cm]");
-
-  // Initialisation of the y-axis label
-  strcpy(description, "\0");
-
-  // x portion
-  if (fabs(plane[0] - 1) < 1.0e-4) {
-    strcat(description, "x");
-  } else if (fabs(plane[0] + 1) < 1.0e-4) {
-    strcat(description, "-x");
-  } else if (plane[0] > 1.0e-4) {
-    sprintf(buf, "%g x", plane[0]);
-    strcat(description, buf);
-  } else if (plane[0] < -1.0e-4) {
-    sprintf(buf, "%g x", plane[0]);
-    strcat(description, buf);
-  }
-
-  // y portion
-  if (strlen(description) > 0) {
-    if (plane[1] < -1.0e-4) {
-      strcat(description, " - ");
-    } else if (plane[1] > 1.0e-4) {
-      strcat(description, " + ");
-    }
-    if (fabs(plane[1] - 1) < 1.0e-4 || fabs(plane[1] + 1) < 1.0e-4) {
-      strcat(description, "y");
-    } else if (fabs(plane[1]) > 1.0e-4) {
-      sprintf(buf, "%g y", fabs(plane[1]));
-      strcat(description, buf);
-    }
-  } else {
-    if (fabs(plane[1] - 1) < 1.0e-4) {
-      strcat(description, "y");
-    } else if (fabs(plane[1] + 1) < 1.0e-4) {
-      strcat(description, "-y");
-    } else if (plane[1] > 1.0e-4) {
-      sprintf(buf, "%g y", plane[1]);
-      strcat(description, buf);
-    } else if (plane[1] < -1.0e-4) {
-      sprintf(buf, "%g y", plane[1]);
-      strcat(description, buf);
-    }
-  }
-
-  // z portion
-  if (strlen(description) > 0) {
-    if (plane[2] < -1.0e-4) {
-      strcat(description, " - ");
-    } else if (plane[2] > 1.0e-4) {
-      strcat(description, " + ");
-    }
-    if (fabs(plane[2] - 1) < 1.0e-4 || fabs(plane[2] + 1) < 1.0e-4) {
-      strcat(description, "z");
-    } else if (fabs(plane[2]) > 1.0e-4) {
-      sprintf(buf, "%g z", fabs(plane[2]));
-      strcat(description, buf);
-    }
-  } else {
-    if (fabs(plane[2] - 1) < 1.0e-4) {
-      strcat(description, "z");
-    } else if (fabs(plane[2] + 1) < 1.0e-4) {
-      strcat(description, "-z");
-    } else if (plane[2] > 1.0e-4) {
-      sprintf(buf, "%g z", plane[2]);
-      strcat(description, buf);
-    } else if (plane[2] < -1.0e-4) {
-      sprintf(buf, "%g z", plane[2]);
-      strcat(description, buf);
-    }
-  }
-
-  // Constant
-  sprintf(buf, " = %g", plane[3]);
-  strcat(description, buf);
-
-  if (debug) {
-    std::cout << className << "::Labels:\n";
-    std::cout << "    x label: |" << xLabel << "|\n";
-    std::cout << "    y label: |" << yLabel << "|\n";
-    std::cout << "    plane:   |" << description << "|\n";
-  }
-}
-
-void ViewField::SetPlane(const double fx, const double fy, const double fz,
-                         const double x0, const double y0, const double z0) {
-
-  // Calculate 2 in-plane vectors for the normal vector
-  double fnorm = sqrt(fx * fx + fy * fy + fz * fz);
-  if (fnorm > 0 && fx * fx + fz * fz > 0) {
-    project[0][0] = fz / sqrt(fx * fx + fz * fz);
-    project[0][1] = 0;
-    project[0][2] = -fx / sqrt(fx * fx + fz * fz);
-    project[1][0] = -fx * fy / (sqrt(fx * fx + fz * fz) * fnorm);
-    project[1][1] = (fx * fx + fz * fz) / (sqrt(fx * fx + fz * fz) * fnorm);
-    project[1][2] = -fy * fz / (sqrt(fx * fx + fz * fz) * fnorm);
-    project[2][0] = x0;
-    project[2][1] = y0;
-    project[2][2] = z0;
-  } else if (fnorm > 0 && fy * fy + fz * fz > 0) {
-    project[0][0] = (fy * fy + fz * fz) / (sqrt(fy * fy + fz * fz) * fnorm);
-    project[0][1] = -fx * fz / (sqrt(fy * fy + fz * fz) * fnorm);
-    project[0][2] = -fy * fz / (sqrt(fy * fy + fz * fz) * fnorm);
-    project[1][0] = 0;
-    project[1][1] = fz / sqrt(fy * fy + fz * fz);
-    project[1][2] = -fy / sqrt(fy * fy + fz * fz);
-    project[2][0] = x0;
-    project[2][1] = y0;
-    project[2][2] = z0;
-  } else {
-    std::cout << className << "::SetPlane:\n";
-    std::cout << "    Normal vector has zero norm.\n";
-    std::cout << "    No new projection set.\n";
-  }
-
-  // Store the plane description
-  plane[0] = fx;
-  plane[1] = fy;
-  plane[2] = fz;
-  plane[3] = fx * x0 + fy * y0 + fz * z0;
-
-  // Make labels to be placed along the axes
-  Labels();
-}
-
-void ViewField::Rotate(const double angle) {
-
-  // Rotate the axes
-  double auxu[3], auxv[3];
-  for (int i = 0; i < 3; ++i) {
-    auxu[i] = cos(angle) * project[0][i] - sin(angle) * project[1][i];
-    auxv[i] = sin(angle) * project[0][i] + cos(angle) * project[1][i];
-  }
-  for (int i = 0; i < 3; ++i) {
-    project[0][i] = auxu[i];
-    project[1][i] = auxv[i];
-  }
-
-  // Make labels to be placed along the axes
-  Labels();
+  return true;
 }
 }

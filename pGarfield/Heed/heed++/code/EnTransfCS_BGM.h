@@ -6,38 +6,32 @@
 
 namespace Heed {
 
-// Energy Transfer Cross Section
-class EnTransfCS_BGM : public RegPassivePtr {
+/// Energy transfer cross-section
+class EnTransfCS_BGM {
  public:
-  // All data from EnTransfCS that do not depend on speed.
-  double particle_mass;  // MeV
-                         // Particle charge in terms of electron charges.
-                         // It is squared, therefore the sign does not matter.
-  long particle_charge;
-  // Sign that the primary particle is an electron
-  int s_primary_electron;
-
-  PassivePtr<HeedMatterDef> hmd;
-  PassivePtr<BGMesh> mesh;
-  DynLinArr<EnTransfCS> etcs_bgm;
-
-  EnTransfCS_BGM(void);
-  EnTransfCS_BGM(double fparticle_mass, PassivePtr<BGMesh> fmesh,
+  /// Default constructor
+  EnTransfCS_BGM() = default;
+  /// Constructor
+  EnTransfCS_BGM(double fparticle_mass, BGMesh* fmesh,
                  int fs_primary_electron, HeedMatterDef* fhmd,
                  long fparticle_charge = 1);
-  macro_copy_total(EnTransfCS_BGM);
 
-  virtual void print(std::ostream& file, int l) const;
+  // All data from EnTransfCS that do not depend on speed.
+  // Particle mass [MeV]
+  double particle_mass = 0.;
+  /// Particle charge in units of electron charges.
+  /// It is squared, therefore the sign does not matter.
+  long particle_charge = 0;
+  /// Sign that the primary particle is an electron
+  int s_primary_electron = 0;
+
+  HeedMatterDef* hmd = nullptr;
+  BGMesh* mesh = nullptr;
+  std::vector<EnTransfCS> etcs_bgm;
+
+  EnTransfCS_BGM* copy() const { return new EnTransfCS_BGM(*this); }
+  void print(std::ostream& file, int l) const;
 };
-
-class EnTransfCS_BGM_Type {
- public:
-  PassivePtr<EnTransfCS_BGM> etcs_bgm;
-  EnTransfCS_BGM_Type(void) : etcs_bgm() { ; }
-  EnTransfCS_BGM_Type(EnTransfCS_BGM* md) : etcs_bgm(md) { ; }
-};
-std::ostream& operator<<(std::ostream& file, const EnTransfCS_BGM_Type& f);
-
 }
 
 #endif

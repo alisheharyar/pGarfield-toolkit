@@ -1,5 +1,6 @@
 #ifndef FUNNAMESTACK_H
 #define FUNNAMESTACK_H
+
 /*
 Copyright (c) 1999 I. B. Smirnov
 
@@ -11,18 +12,17 @@ appear in all copies and in supporting documentation.
 It is provided "as is" without express or implied warranty.
 */
 
-#include <stdlib.h>
-#include <string.h>
+#include <list>
 #include <iostream>
+#include <cstdlib>
 #include "wcpplib/stream/prstream.h"
-#include "wcpplib/util/inlinec.h"
 
 //#define USE_BOOST_MULTITHREADING
 //#define PRINT_MESSAGE_ABOUT_THREAD_INITIALIZATION
 // Prints a long message at initialization of FunNameStack.
-// The message is quite long and nusty and it is unlikely that
+// The message is quite long and it is unlikely that
 // it can be visually missed even if it is interrupted by play of threads.
-// This nusty message is not necessary at the routine work.
+// This message is not necessary in routine work.
 
 #ifdef USE_BOOST_MULTITHREADING
 #include "boost/thread/mutex.hpp"
@@ -35,83 +35,26 @@ It is provided "as is" without express or implied warranty.
 #undef FUNNAMESTACK
 #endif
 */
-// Here there is a good place to switch off the
-// assertion checks in all the programs
-//#ifdef DO_CHECKS
-//#undef DO_CHECKS
-//#endif
 
-#define stackprt(stream) stream << FunNameStack::instance()
-// Definitions which can be switched off
+// Switch on/off initialization of function names.
 #ifdef FUNNAMESTACK
-#define mfunname(string)             \
-  static char* FunNameIIII = string; \
+#define mfunname(string)                   \
+  static const char* FunNameIIII = string; \
   FunNameWatch funnw(FunNameIIII)
-#define mfunname1(string)             \
-  static char* FunNameIIII1 = string; \
-  FunNameWatch funnw1(FunNameIIII1)
-#define mfunname2(string)             \
-  static char* FunNameIIII2 = string; \
-  FunNameWatch funnw2(FunNameIIII2)
-#define mfunname3(string)             \
-  static char* FunNameIIII3 = string; \
-  FunNameWatch funnw3(FunNameIIII3)
-#define mfunname4(string)             \
-  static char* FunNameIIII4 = string; \
-  FunNameWatch funnw4(FunNameIIII4)
-#define mfunname5(string)             \
-  static char* FunNameIIII5 = string; \
-  FunNameWatch funnw5(FunNameIIII5)
-//#define stackprt(stream)  stream<<funnamestack
 #else
 #define mfunname(string)
-#define mfunname1(string)
-#define mfunname2(string)
-#define mfunname3(string)
-#define mfunname4(string)
-#define mfunname5(string)
-//#define stackprt(stream)
 #endif
 
 // Permanent definitions
 #define mfunnamep(string)                  \
   static const char* FunNameIIII = string; \
   FunNameWatch funnw(FunNameIIII)
-#define mfunnamep1(string)                  \
-  static const char* FunNameIIII1 = string; \
-  FunNameWatch funnw1(FunNameIIII1)
-#define mfunnamep2(string)                  \
-  static const char* FunNameIIII2 = string; \
-  FunNameWatch funnw2(FunNameIIII2)
-#define mfunnamep3(string)                  \
-  static const char* FunNameIIII3 = string; \
-  FunNameWatch funnw3(FunNameIIII3)
-#define mfunnamep4(string)                  \
-  static const char* FunNameIIII4 = string; \
-  FunNameWatch funnw4(FunNameIIII4)
-#define mfunnamep5(string)                  \
-  static const char* FunNameIIII5 = string; \
-  FunNameWatch funnw5(FunNameIIII5)
 
-// Checks
+// Switch on/off checks
 #define DO_CHECKS
 #ifdef DO_CHECKS
 
 #ifdef FUNNAMESTACK
-
-#define check_econd(condition, add, stream) \
-  if (condition) {                          \
-    funnw.ehdr(stream);                     \
-    stream << '\n' << #condition << '\n';   \
-    stream << add;                          \
-    spexit(stream);                         \
-  }
-#define check_wcond(condition, add, stream) \
-  if (condition) {                          \
-    funnw.whdr(stream);                     \
-    stream << '\n' << #condition << '\n';   \
-    stream << add;                          \
-  }
 
 #define check_econd1(condition, a1, stream) \
   if (condition) {                          \
@@ -127,64 +70,12 @@ It is provided "as is" without express or implied warranty.
     stream << #a1 << '=' << (a1) << '\n';   \
   }
 
-#define check_econd2(condition, a1, a2, stream)                        \
-  if (condition) {                                                     \
-    funnw.ehdr(stream);                                                \
-    stream << '\n' << #condition << '\n';                              \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << '\n'; \
-    spexit(stream);                                                    \
-  }
-#define check_wcond2(condition, a1, a2, stream)                        \
-  if (condition) {                                                     \
-    funnw.whdr(stream);                                                \
-    stream << '\n' << #condition << '\n';                              \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << '\n'; \
-  }
-
-#define check_econd3(condition, a1, a2, a3, stream)                         \
-  if (condition) {                                                          \
-    funnw.ehdr(stream);                                                     \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << '\n';                                          \
-    spexit(stream);                                                         \
-  }
-#define check_wcond3(condition, a1, a2, a3, stream)                         \
-  if (condition) {                                                          \
-    funnw.whdr(stream);                                                     \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << '\n';                                          \
-  }
-
-#define check_econd4(condition, a1, a2, a3, a4, stream)                     \
-  if (condition) {                                                          \
-    funnw.ehdr(stream);                                                     \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << ' ' << #a4 << '=' << (a4) << '\n';             \
-    spexit(stream);                                                         \
-  }
-#define check_wcond4(condition, a1, a2, a3, a4, stream)                     \
-  if (condition) {                                                          \
-    funnw.whdr(stream);                                                     \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << ' ' << #a4 << '=' << (a4) << '\n';             \
-  }
-
 #define check_econd11(a, signb, stream)     \
   if (a signb) {                            \
     funnw.ehdr(stream);                     \
     stream << '\n' << #a << #signb << '\n'; \
     stream << #a << '=' << (a) << '\n';     \
     spexit(stream);                         \
-  }
-#define check_wcond11(a, signb, stream)     \
-  if (a signb) {                            \
-    funnw.whdr(stream);                     \
-    stream << '\n' << #a << #signb << '\n'; \
-    stream << #a << '=' << (a) << '\n';     \
   }
 
 #define check_econd12(a, sign, b, stream)                          \
@@ -194,14 +85,8 @@ It is provided "as is" without express or implied warranty.
     stream << #a << '=' << (a) << ' ' << #b << '=' << (b) << '\n'; \
     spexit(stream);                                                \
   }
-#define check_wcond12(a, sign, b, stream)                          \
-  if (a sign b) {                                                  \
-    funnw.whdr(stream);                                            \
-    stream << '\n' << #a << #sign << #b << '\n';                   \
-    stream << #a << '=' << (a) << ' ' << #b << '=' << (b) << '\n'; \
-  }
 
-//condition + additional any commands
+// condition + additional any commands
 #define check_econd11a(a, signb, add, stream) \
   if (a signb) {                              \
     funnw.ehdr(stream);                       \
@@ -210,13 +95,6 @@ It is provided "as is" without express or implied warranty.
     stream << add;                            \
     spexit(stream);                           \
   }
-#define check_wcond11a(a, signb, add, stream) \
-  if (a signb) {                              \
-    funnw.whdr(stream);                       \
-    stream << '\n' << #a << #signb << '\n';   \
-    stream << #a << '=' << (a) << '\n';       \
-    stream << add;                            \
-  }
 
 #define check_econd12a(a, sign, b, add, stream)                    \
   if (a sign b) {                                                  \
@@ -226,32 +104,19 @@ It is provided "as is" without express or implied warranty.
     stream << add;                                                 \
     spexit(stream);                                                \
   }
-#define check_wcond12a(a, sign, b, add, stream)                    \
-  if (a sign b) {                                                  \
-    funnw.whdr(stream);                                            \
-    stream << '\n' << #a << #sign << #b << '\n';                   \
-    stream << #a << '=' << (a) << ' ' << #b << '=' << (b) << '\n'; \
-    stream << add;                                                 \
-  }
 
 // and of two conditions for one variable
 #define check_econd21(a, sign1_b1_sign0, sign2_b2, stream)              \
-  if(a sign1_b1_sign0 a sign2_b2) {                                     \
+  if (a sign1_b1_sign0 a sign2_b2) {                                    \
     funnw.ehdr(stream);                                                 \
     stream << '\n' << #a << #sign1_b1_sign0 << #a << #sign2_b2 << '\n'; \
     stream << #a << '=' << (a) << '\n';                                 \
     spexit(stream);                                                     \
   }
-#define check_wcond21(a, sign1_b1_sign0, sign2_b2, stream)              \
-  if(a sign1_b1_sign0 a sign2_b2) {                                     \
-    funnw.whdr(stream);                                                 \
-    stream << '\n' << #a << #sign1_b1_sign0 << #a << #sign2_b2 << '\n'; \
-    stream << #a << '=' << (a) << '\n';                                 \
-  }
 
 // and of two conditions for one variable
 #define check_econd23(a, sign1, b1, sign0, sign2, b2, stream)              \
-  if(a sign1 b1 sign0 a sign2 b2) {                                        \
+  if (a sign1 b1 sign0 a sign2 b2) {                                       \
     funnw.ehdr(stream);                                                    \
     stream << '\n' << #a << #sign1 << #b1 << #sign0 << #a << #sign2 << #b2 \
            << '\n';                                                        \
@@ -259,18 +124,10 @@ It is provided "as is" without express or implied warranty.
            << '=' << (b2) << '\n';                                         \
     spexit(stream);                                                        \
   }
-#define check_wcond23(a, sign1, b1, sign0, sign2, b2, stream)              \
-  if(a sign1 b1 sign0 a sign2 b2) {                                        \
-    funnw.whdr(stream);                                                    \
-    stream << '\n' << #a << #sign1 << #b1 << #sign0 << #a << #sign2 << #b2 \
-           << '\n';                                                        \
-    stream << #a << '=' << (a) << ' ' << #b1 << '=' << (b1) << ' ' << #b2  \
-           << '=' << (b2) << '\n';                                         \
-  }
 
 // two conditions for four variables
 #define check_econd24(a1, sign1, b1, sign0, a2, sign2, b2, stream)           \
-  if(a1 sign1 b1 sign0 a2 sign2 b2) {                                        \
+  if (a1 sign1 b1 sign0 a2 sign2 b2) {                                       \
     funnw.ehdr(stream);                                                      \
     stream << '\n' << #a1 << #sign1 << #b1 << #sign0 << #a2 << #sign2 << #b2 \
            << '\n';                                                          \
@@ -278,30 +135,8 @@ It is provided "as is" without express or implied warranty.
     stream << #a2 << '=' << (a2) << ' ' << #b2 << '=' << (b2) << '\n';       \
     spexit(stream);                                                          \
   }
-#define check_wcond24(a1, sign1, b1, sign0, a2, sign2, b2, stream)           \
-  if(a1 sign1 b1 sign0 a2 sign2 b2) {                                        \
-    funnw.whdr(stream);                                                      \
-    stream << '\n' << #a1 << #sign1 << #b1 << #sign0 << #a2 << #sign2 << #b2 \
-           << '\n';                                                          \
-    stream << #a1 << '=' << (a1) << ' ' << #b1 << '=' << (b1) << '\n';       \
-    stream << #a2 << '=' << (a2) << ' ' << #b2 << '=' << (b2) << '\n';       \
-  }
 
 #else  // without FUNNAMESTACK, print only condition
-
-#define check_econd(condition, add, stream) \
-  if (condition) {                          \
-    stream << "ERROR:\n";                   \
-    stream << '\n' << #condition << '\n';   \
-    stream << add;                          \
-    spexit(stream);                         \
-  }
-#define check_wcond(condition, add, stream) \
-  if (condition) {                          \
-    stream << "WARNING:\n";                 \
-    stream << '\n' << #condition << '\n';   \
-    stream << add;                          \
-  }
 
 #define check_econd1(condition, a1, stream) \
   if (condition) {                          \
@@ -317,64 +152,12 @@ It is provided "as is" without express or implied warranty.
     stream << #a1 << '=' << (a1) << '\n';   \
   }
 
-#define check_econd2(condition, a1, a2, stream)                        \
-  if (condition) {                                                     \
-    stream << "ERROR:\n";                                              \
-    stream << '\n' << #condition << '\n';                              \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << '\n'; \
-    spexit(stream);                                                    \
-  }
-#define check_wcond2(condition, a1, a2, stream)                        \
-  if (condition) {                                                     \
-    stream << "WARNING:\n";                                            \
-    stream << '\n' << #condition << '\n';                              \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << '\n'; \
-  }
-
-#define check_econd3(condition, a1, a2, a3, stream)                         \
-  if (condition) {                                                          \
-    stream << "ERROR:\n";                                                   \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << '\n';                                          \
-    spexit(stream);                                                         \
-  }
-#define check_wcond3(condition, a1, a2, a3, stream)                         \
-  if (condition) {                                                          \
-    stream << "WARNING:\n";                                                 \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << '\n';                                          \
-  }
-
-#define check_econd4(condition, a1, a2, a3, a4, stream)                     \
-  if (condition) {                                                          \
-    stream << "ERROR:\n";                                                   \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << ' ' << #a4 << '=' << (a4) << '\n';             \
-    spexit(stream);                                                         \
-  }
-#define check_wcond4(condition, a1, a2, a3, a4, stream)                     \
-  if (condition) {                                                          \
-    stream << "WARNING:\n";                                                 \
-    stream << '\n' << #condition << '\n';                                   \
-    stream << #a1 << '=' << (a1) << ' ' << #a2 << '=' << (a2) << ' ' << #a3 \
-           << '=' << (a3) << ' ' << #a4 << '=' << (a4) << '\n';             \
-  }
-
 #define check_econd11(a, signb, stream)     \
   if (a signb) {                            \
     stream << "ERROR:\n";                   \
     stream << '\n' << #a << #signb << '\n'; \
     stream << #a << '=' << (a) << '\n';     \
     spexit(stream);                         \
-  }
-#define check_wcond11(a, signb, stream)     \
-  if (a signb) {                            \
-    stream << "WARNING:\n";                 \
-    stream << '\n' << #a << #signb << '\n'; \
-    stream << #a << '=' << (a) << '\n';     \
   }
 
 #define check_econd12(a, sign, b, stream)                          \
@@ -384,14 +167,8 @@ It is provided "as is" without express or implied warranty.
     stream << #a << '=' << (a) << ' ' << #b << '=' << (b) << '\n'; \
     spexit(stream);                                                \
   }
-#define check_wcond12(a, sign, b, stream)                          \
-  if (a sign b) {                                                  \
-    stream << "WARNING:\n";                                        \
-    stream << '\n' << #a << #sign << #b << '\n';                   \
-    stream << #a << '=' << (a) << ' ' << #b << '=' << (b) << '\n'; \
-  }
 
-//condition + additional any commands
+// condition + additional any commands
 #define check_econd11a(a, signb, add, stream) \
   if (a signb) {                              \
     stream << "ERROR:\n";                     \
@@ -399,13 +176,6 @@ It is provided "as is" without express or implied warranty.
     stream << #a << '=' << (a) << '\n';       \
     stream << add;                            \
     spexit(stream);                           \
-  }
-#define check_wcond11a(a, signb, add, stream) \
-  if (a signb) {                              \
-    stream << "WARNING:\n";                   \
-    stream << '\n' << #a << #signb << '\n';   \
-    stream << #a << '=' << (a) << '\n';       \
-    stream << add;                            \
   }
 
 #define check_econd12a(a, sign, b, add, stream)                    \
@@ -416,32 +186,19 @@ It is provided "as is" without express or implied warranty.
     stream << add;                                                 \
     spexit(stream);                                                \
   }
-#define check_wcond12a(a, sign, b, add, stream)                    \
-  if (a sign b) {                                                  \
-    stream << "WARNING:\n";                                        \
-    stream << '\n' << #a << #sign << #b << '\n';                   \
-    stream << #a << '=' << (a) << ' ' << #b << '=' << (b) << '\n'; \
-    stream << add;                                                 \
-  }
 
 // and of two conditions for one variable
 #define check_econd21(a, sign1_b1_sign0, sign2_b2, stream)              \
-  if(a sign1_b1_sign0 a sign2_b2) {                                     \
+  if (a sign1_b1_sign0 a sign2_b2) {                                    \
     stream << "ERROR:\n";                                               \
     stream << '\n' << #a << #sign1_b1_sign0 << #a << #sign2_b2 << '\n'; \
     stream << #a << '=' << (a) << '\n';                                 \
     spexit(stream);                                                     \
   }
-#define check_wcond21(a, sign1_b1_sign0, sign2_b2, stream)              \
-  if(a sign1_b1_sign0 a sign2_b2) {                                     \
-    stream << "WARNING:\n";                                             \
-    stream << '\n' << #a << #sign1_b1_sign0 << #a << #sign2_b2 << '\n'; \
-    stream << #a << '=' << (a) << '\n';                                 \
-  }
 
 // and of two conditions for one variable
 #define check_econd23(a, sign1, b1, sign0, sign2, b2, stream)              \
-  if(a sign1 b1 sign0 a sign2 b2) {                                        \
+  if (a sign1 b1 sign0 a sign2 b2) {                                       \
     stream << "ERROR:\n";                                                  \
     stream << '\n' << #a << #sign1 << #b1 << #sign0 << #a << #sign2 << #b2 \
            << '\n';                                                        \
@@ -449,18 +206,10 @@ It is provided "as is" without express or implied warranty.
            << '=' << (b2) << '\n';                                         \
     spexit(stream);                                                        \
   }
-#define check_wcond23(a, sign1, b1, sign0, sign2, b2, stream)              \
-  if(a sign1 b1 sign0 a sign2 b2) {                                        \
-    stream << "WARNING:\n";                                                \
-    stream << '\n' << #a << #sign1 << #b1 << #sign0 << #a << #sign2 << #b2 \
-           << '\n';                                                        \
-    stream << #a << '=' << (a) << ' ' << #b1 << '=' << (b1) << ' ' << #b2  \
-           << '=' << (b2) << '\n';                                         \
-  }
 
 // two conditions for four variables
 #define check_econd24(a1, sign1, b1, sign0, a2, sign2, b2, stream)           \
-  if(a1 sign1 b1 sign0 a2 sign2 b2) {                                        \
+  if (a1 sign1 b1 sign0 a2 sign2 b2) {                                       \
     stream << "ERROR:\n";                                                    \
     stream << '\n' << #a1 << #sign1 << #b1 << #sign0 << #a2 << #sign2 << #b2 \
            << '\n';                                                          \
@@ -468,63 +217,32 @@ It is provided "as is" without express or implied warranty.
     stream << #a2 << '=' << (a2) << ' ' << #b2 << '=' << (b2) << '\n';       \
     spexit(stream);                                                          \
   }
-#define check_wcond24(a1, sign1, b1, sign0, a2, sign2, b2, stream)           \
-  if(a1 sign1 b1 sign0 a2 sign2 b2) {                                        \
-    stream << "WARNING:\n";                                                  \
-    stream << '\n' << #a1 << #sign1 << #b1 << #sign0 << #a2 << #sign2 << #b2 \
-           << '\n';                                                          \
-    stream << #a1 << '=' << (a1) << ' ' << #b1 << '=' << (b1) << '\n';       \
-    stream << #a2 << '=' << (a2) << ' ' << #b2 << '=' << (b2) << '\n';       \
-  }
 
 #endif
 
 #else  // without checks
 
-#define check_econd(condition, add, stream)
-#define check_wcond(condition, add, stream)
-
 #define check_econd1(condition, a1, stream)
 #define check_wcond1(condition, a1, stream)
 
-#define check_econd2(condition, a1, a2, stream)
-#define check_wcond2(condition, a1, a2, stream)
-
-#define check_econd3(condition, a1, a2, a3, stream)
-#define check_wcond3(condition, a1, a2, a3, stream)
-
-#define check_econd4(condition, a1, a2, a3, a4, stream)
-#define check_wcond4(condition, a1, a2, a3, a4, stream)
-
 #define check_econd11(a, signb, stream)
-#define check_wcond11(a, signb, stream)
-
 #define check_econd12(a, sign, b, stream)
-#define check_wcond12(a, sign, b, stream)
-
 #define check_econd11a(a, signb, add, stream)
-#define check_wcond11a(a, signb, add, stream)
-
 #define check_econd12a(a, sign, b, add, stream)
-#define check_wcond12a(a, sign, b, add, stream)
-
 // and of two conditions for one variable
 #define check_econd21(a, sign1_b1_sign0, sign2_b2, stream)
-#define check_wcond21(a, sign1_b1_sign0, sign2_b2, stream)
-
 // and of two conditions for one variable
 #define check_econd23(a, sign1, b1, sign0, sign2, b2, stream)
-#define check_wcond23(a, sign1, b1, sign0, sign2, b2, stream)
-
 // two conditions for four variables
 #define check_econd24(a1, sign1, b1, sign0, a2, sign2, b2, stream)
-#define check_wcond24(a1, sign1, b1, sign0, a2, sign2, b2, stream)
 
 #endif
 
+namespace Heed {
+
 class ExcFromSpexit {
  public:
-  ExcFromSpexit(void) { ; }
+  ExcFromSpexit() {}
 };
 
 void spexit_action(std::ostream& file);
@@ -532,19 +250,16 @@ extern int s_throw_exception_in_spexit;  // if == 1, does exit(1) of abort()
                                          // depending on the key below
 extern int s_exit_without_core;          // the key above have larger priority
 
+}
+
 // Normal exit:
 #define spexit(stream)                                                   \
   {                                                                      \
-    stackprt(stream);                                                    \
+    stream << FunNameStack::instance();                                  \
     stream << "File is " << __FILE__ << " , line number is " << __LINE__ \
            << '\n';                                                      \
     spexit_action(stream);                                               \
   }
-
-const int pqname = 1000;  // this depth of stack is completely OK
-                          // for all correct programs.
-// If you have overflow, it is likely the infinite loop with recursion
-// in your program!
 
 // Converting to a quasi-singleton class:
 // The program operates only with main hidden exsemplar.
@@ -559,12 +274,13 @@ in a singleton object of FunNameStack class.
 For multithreading mode we need to introduce special intermediate class
 NameStack and initialize one object of this class per each found thread.
 */
-//#include "wcpplib/safetl/AbsList.h"  // this does not work, because it
-// refers through some sequence to this file.
-template <class T> class AbsList;  // This is enough.
 
 class NameStack {
  public:
+  static const int pqname = 1000;
+  // this depth of stack is completely OK for all correct programs.
+  // If you have overflow, it is likely the infinite loop with recursion
+  // in your program!
   int qname;
   char* name[pqname];
   pthread_t id;
@@ -575,20 +291,20 @@ class NameStack {
               //     It is not convenient for normal work due
               //     to time expense
   NameStack(void) : qname(0), id(0), nmode(0) {
-    for (int n = 0; n < pqname; n++)
-      name[n] = NULL;
+    for (int n = 0; n < pqname; n++) name[n] = NULL;
   }
   NameStack(const NameStack& f) : qname(0), id(0), nmode(0) { *this = f; }
 
   NameStack& operator=(const NameStack& f);
 
   ~NameStack(void) {
-    int n;
-    if (nmode == 1) for (n = 0; n < qname; n++)
-        delete name[n];
+    if (nmode == 1)
+      for (int n = 0; n < qname; n++) delete name[n];
   }
 };
 #endif
+
+namespace Heed {
 
 class FunNameStack {
  public:
@@ -612,13 +328,13 @@ class FunNameStack {
 
   void remove_thread_stack(void);
 #endif
-//const static int pqname;   // doesn't work on Sun
 #ifdef USE_BOOST_MULTITHREADING
-  AbsList<NameStack>* namestack;
+  std::list<NameStack>* namestack;
 // Cannot put ActivePtr here because it uses  FunNameStack itself
 // and wants it to be completed.
 #else
   int qname;
+  static const int pqname = 1000;
   char* name[pqname];
 #endif
   int s_init;  // 1 - sign that it is inited,
@@ -644,42 +360,25 @@ class FunNameStack {
               //     to time expense
 
 #ifdef USE_BOOST_MULTITHREADING
-  std::ostream& printname(std::ostream& file, NameStack* ns, int n);  //
+  std::ostream& printname(std::ostream& file, NameStack* ns, int n); 
 #else
-  std::ostream& printname(std::ostream& file, int n);  //
+  std::ostream& printname(std::ostream& file, int n); 
 #endif
  public:
   void set_parameters(int fs_act = 1, int fs_print = 0);
   ~FunNameStack();
 
  private:
-  void printput(
-      std::ostream& file);  // called at insertion of new name in stack
+  void printput(std::ostream& file);  // called at insertion of new name in
+                                      // stack
   void printdel(std::ostream& file);  // called at deletion of name from stack
  public:
-  //#ifdef USE_BOOST_MULTITHREADING
-  //wl_inline void put(char* fname);
-  //#else
-  wl_inline int put(const char* fname);
-  //#endif
-  wl_inline void del(int nname);
-  wl_inline void replace(const char* fname);
+  inline int put(const char* fname);
+  inline void del(int nname);
+  inline void replace(const char* fname);
   friend std::ostream& operator<<(std::ostream& file, const FunNameStack& f);
 };
 std::ostream& operator<<(std::ostream& file, const FunNameStack& f);
-
-// The following class is used solerly
-// to change parameters of main FunNameStack, where it needs to do
-// "globally", before main() is started.
-// see the file FunNameStack_ts.c for example.
-class FunNameStack_Assist {
- public:
-  FunNameStack_Assist(int fs_act = 1, int fs_print = 0) {
-    FunNameStack::instance().set_parameters(fs_act = 1, fs_print);
-  }
-};
-
-//extern FunNameStack funnamestack;
 
 // Object of this class FunNameWatch is created at the beginning of function.
 // At creation it writes function name in stack.
@@ -691,28 +390,8 @@ class FunNameWatch {
   const char* name;  // it is memorized independenlty on s_act.
                      // Used for printing of headers.
  public:
-  wl_inline FunNameWatch(const char* fname);
-  /*
-  FunNameWatch(char* fname):name(fname)
-    {
-#ifdef FUNNAMESTACK
-      nname=funnamestack.put(fname);
-#else
-      nname=0;
-#endif
-    }
-  */
-  //FunNameWatch(void):name(NULL), nname(-1) { ; }  // temporary
-
-  wl_inline ~FunNameWatch();
-  /*
-    {
-#ifdef FUNNAMESTACK
-      if( nname>=0)
-	funnamestack.del(nname);
-#endif
-    }
-  */
+  inline FunNameWatch(const char* fname);
+  inline ~FunNameWatch();
 
   // print header
   std::ostream& hdr(std::ostream& file) const {
@@ -732,20 +411,8 @@ class FunNameWatch {
 };
 std::ostream& operator<<(std::ostream& file, const FunNameWatch& f);
 
-/* It is assumed to be general basical class for catching of errors.
-Any error thrown with FunNameStack can be catched with pointer to this class.
-*/
-class GenError : public FunNameStack {
- public:
-  GenError(const FunNameStack& f) : FunNameStack(f) { ; }
-  GenError(const GenError& f) : FunNameStack(f) { ; }
-  virtual void print(std::ostream& file);
-  virtual void finish(std::ostream& file);
-  virtual ~GenError() {}
-};
-//std::ostream& operator<<(std::ostream& file, const GenError& f);
-#ifdef WCPPLIB_INLINE
 #include "wcpplib/util/FunNameStack.ic"
-#endif
+
+}
 
 #endif

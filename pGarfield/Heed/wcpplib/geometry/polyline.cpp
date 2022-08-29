@@ -15,12 +15,12 @@ The file is provided "as is" without express or implied warranty.
 namespace Heed {
 
 // **** polyline  ****
-void polyline::get_components(ActivePtr<absref_transmit>& aref_tran) {
-  aref_tran.pass(new absref_transmit(qpt + qsl, aref));
+absref_transmit polyline::get_components() {
+  return absref_transmit(qpt + qsl, aref);
 }
 
 polyline::polyline(polyline& pl) : absref(pl) {
-  mfunname("polyline::polyline(      polyline &pl)");
+  mfunname("polyline::polyline(polyline &pl)");
   polyline_init(pl.pt, pl.qpt);
 }
 polyline::polyline(const polyline& pl) : absref(pl) {
@@ -50,30 +50,27 @@ polyline& polyline::operator=(const polyline& fpl) {
 void polyline::polyline_init(const point* fpt, int fqpt) {
   pvecerror("void polyline::polyline_init(const point* fpt, int fqpt)");
   check_econd11(fqpt, < 0, mcerr)
-  if (fqpt >= 1) {
-    pt = new point[fqpt];
-    for (qpt = 0; qpt < fqpt; ++qpt)
-      pt[qpt] = fpt[qpt];
-    if (fqpt >= 2) {
-      sl = new straight[qpt - 1];
-      for (qsl = 0; qsl < qpt - 1; ++qsl) {
-        sl[qsl] = straight(pt[qsl], pt[qsl + 1]);
-      }
-    } else {
-      sl = NULL;
-    }
-    aref = new absref* [qpt + qsl];
-    for (int n = 0; n < qpt; ++n)
-      aref[n] = &pt[n];
-    for (int n = 0; n < qsl; ++n)
-      aref[n + qpt] = &sl[n];
-  } else {
+  if (fqpt < 1) {
     qpt = 0;
     qsl = 0;
     pt = NULL;
     sl = NULL;
     aref = NULL;
+    return;
+  } 
+  pt = new point[fqpt];
+  for (qpt = 0; qpt < fqpt; ++qpt) pt[qpt] = fpt[qpt];
+  if (fqpt >= 2) {
+    sl = new straight[qpt - 1];
+    for (qsl = 0; qsl < qpt - 1; ++qsl) {
+      sl[qsl] = straight(pt[qsl], pt[qsl + 1]);
+    }
+  } else {
+    sl = NULL;
   }
+  aref = new absref* [qpt + qsl];
+  for (int n = 0; n < qpt; ++n) aref[n] = &pt[n];
+  for (int n = 0; n < qsl; ++n) aref[n + qpt] = &sl[n];
 }
 
 int polyline::check_point_in(const point& fpt, vfloat prec) const {
@@ -109,11 +106,11 @@ int polyline::cross(const straight& fsl, point* pc, int& qpc, polyline* pl,
       pl[qpl++] = polyline(&(pt[n]), 2);
     } else {
       vec v1 = pc[qpc] - pt[n];
-      if (length(v1) < prec) {
+      if (v1.length() < prec) {
         qpc++;
       } else {
         vec v2 = pc[qpc] - pt[n + 1];
-        if (length(v2) < prec) {
+        if (v2.length() < prec) {
           qpc++;
         } else if (check_par(v1, v2, prec) == -1) {
           // anti-parallel vectors, point inside borders
@@ -162,8 +159,8 @@ vfloat polyline::distance(const point& fpt) const {
         -1) {  // anti-parallel vectors, point inside borders
       if (sldist < mx) mx = sldist;
     } else {
-      if ((sldist = length(fpt - pt[n])) < mx) mx = sldist;
-      if ((sldist = length(fpt - pt[n + 1])) < mx) mx = sldist;
+      if ((sldist = (fpt - pt[n]).length()) < mx) mx = sldist;
+      if ((sldist = (fpt - pt[n + 1]).length()) < mx) mx = sldist;
     }
   }
   return mx;
@@ -187,11 +184,11 @@ vfloat polyline::distance(const point& fpt, point& fcpt) const {
         fcpt = cpt;
       }
     } else {
-      if ((sldist = length(fpt - pt[n])) < mx) {
+      if ((sldist = (fpt - pt[n]).length()) < mx) {
         mx = sldist;
         fcpt = pt[n];
       }
-      if ((sldist = length(fpt - pt[n + 1])) < mx) {
+      if ((sldist = (fpt - pt[n + 1]).length()) < mx) {
         mx = sldist;
         fcpt = pt[n + 1];
       }
@@ -206,8 +203,7 @@ int cross4pllines(const polyline pl[4], vfloat precision, straight& sl,
       "int cross4pllines(const polyline pl[4], straight& sl, point ptc[4][2])");
   int n;
   straight slpl[4];
-  for (n = 0; n < 4; n++)
-    slpl[n] = pl[n].Gsl(0);
+  for (n = 0; n < 4; n++) slpl[n] = pl[n].Gsl(0);
   point pt[2];
   pt[0] = (pl[1].Gpt(0).v + pl[1].Gpt(1).v) * 0.5;
   pt[1] = (pl[2].Gpt(0).v + pl[2].Gpt(1).v) * 0.5;
@@ -227,20 +223,18 @@ std::ostream& operator<<(std::ostream& file, const polyline& p) {
   Ifile << "polyline:\n";
   indn.n += 2;
   Ifile << "qpt=" << p.qpt << '\n';
-  for (n = 0; n < p.qpt; n++)
-    file << p.pt[n];
+  for (n = 0; n < p.qpt; n++) file << p.pt[n];
   Ifile << "qsl=" << p.qsl << '\n';
-  for (n = 0; n < p.qsl; n++)
-    file << p.sl[n];
+  for (n = 0; n < p.qsl; n++) file << p.sl[n];
   indn.n -= 2;
   return file;
 }
-//             **** polyline in plane  ****
+// **** polyline in plane  ****
 
-absref absref::*(polyline_pl::aref_pl) = (absref absref::*)&polyline_pl::pn;
+absref absref::* polyline_pl::aref_pl = (absref absref::*)&polyline_pl::pn;
 
-void polyline_pl::get_components(ActivePtr<absref_transmit>& aref_tran) {
-  aref_tran.pass(new absref_transmit(1, &aref_pl, qpt + qsl, aref));
+absref_transmit polyline_pl::get_components() {
+  return absref_transmit(1, &aref_pl, qpt + qsl, aref);
 }
 
 polyline_pl::polyline_pl(polyline& pl) {
@@ -275,7 +269,8 @@ std::ostream& operator<<(std::ostream& file, const polyline_pl& p) {
   Ifile << "polyline_pl:\n";
   indn.n += 2;
   file << p.pn;
-  file << statcast(const polyline&, p);
+  // file << statcast(const polyline&, p);
+  file << static_cast<const polyline&>(p);
   indn.n -= 2;
   return file;
 }
@@ -295,8 +290,8 @@ polygon::polygon(const straight* fsl, int fqsl, vfloat prec)
     for (m = n + 1; m < fqsl; m++) {
       if (fsl[n].Gpiv() == fsl[m].Gpiv())
         if (check_par(fsl[n].Gdir(), fsl[m].Gdir(), 0) !=
-            0)  //1 par, -1 antipar
-            {
+            0)  // 1 par, -1 antipar
+        {
           mcerr << "error in polyline_init(straight* fsl, int fqsl):\n"
                 << "Parallel lines with the same pivot cannot form polygin\n";
           for (int k = 0; k < fqsl; k++)
@@ -329,8 +324,7 @@ polygon::polygon(const straight* fsl, int fqsl, vfloat prec)
   polyline_pl pll(pnl, ptl, qptl);
   *this = polygon(pll, 1);
 
-  delete ptl;
-
+  delete[] ptl;
 }
 
 polygon& polygon::operator=(const polygon& fpl) {
@@ -362,9 +356,9 @@ int polygon::check_point_in(const point& fpt, vfloat prec) const {
   endpt[1] = pt[0];
   double totang = 0;
   double ang, ang2;
-  //int s_start[2];
-  //s_start[0]=0;
-  //s_start[1]=0;
+  // int s_start[2];
+  // s_start[0]=0;
+  // s_start[1]=0;
   int n;
   for (n = 0; n < qpt - 1; n++) {
     ang2 = 0.0;
@@ -385,8 +379,8 @@ int polygon::check_point_in(const point& fpt, vfloat prec) const {
 point polygon::cross(const straight& fsl, vfloat prec) const {
   pvecerror("point polygon::cross(straight& fsl)");
   point cpt = pn.cross(fsl);  // does it cross the plane
-                              //mcout<<"polygon::cross: cpt="<<cpt;
-                              //mcout<<"vecerror="<<vecerror<<'\n';
+  // mcout<<"polygon::cross: cpt="<<cpt;
+  // mcout<<"vecerror="<<vecerror<<'\n';
   if (vecerror != 0) return cpt;
   int s = check_point_in(cpt, prec);
   if (s > 0)
@@ -398,8 +392,9 @@ point polygon::cross(const straight& fsl, vfloat prec) const {
 }
 int polygon::range(const point& fpt, const vec& dir, vfloat& rng, point& fptenr,
                    vfloat prec) const {
-  pvecerror("int polygon::range(const point& fpt, const vec& dir, vfloat& rng, "
-            " point &fptenr)");
+  pvecerror(
+      "int polygon::range(const point& fpt, const vec& dir, vfloat& rng, "
+      " point &fptenr)");
   straight stl(fpt, dir);
   point pnt = cross(stl, prec);
   if (vecerror != 0) {
@@ -409,7 +404,7 @@ int polygon::range(const point& fpt, const vec& dir, vfloat& rng, point& fptenr,
   vec dif = pnt - fpt;
   const int i = check_par(dif, dir, prec);
   if (i == 1) {
-    rng = length(dif);
+    rng = dif.length();
     fptenr = pnt;
     return 1;
   } else
@@ -420,24 +415,25 @@ std::ostream& operator<<(std::ostream& file, const polygon& p) {
   Ifile << "polygon:\n";
   indn.n += 2;
   Ifile << "s_convex=" << p.s_convex << '\n';
-  file << statcast(const polyline_pl&, p);
+  file << static_cast<const polyline_pl&>(p);
   indn.n -= 2;
   return file;
 }
-//             ***  rectangle ***
-absref absref::*(rectangle::aref_rct[4]) = {
-  (absref absref::*)&rectangle::pn, (absref absref::*)&rectangle::piv,
-  (absref absref::*)&rectangle::dir1, (absref absref::*)&rectangle::dir2
-};
 
-void rectangle::get_components(ActivePtr<absref_transmit>& aref_tran) {
-  aref_tran.pass(new absref_transmit(4, aref_rct, qpt + qsl, aref));
+// ***  rectangle ***
+absref absref::* rectangle::aref_rct[4] = {
+    (absref absref::*)&rectangle::pn,   (absref absref::*)&rectangle::piv,
+    (absref absref::*)&rectangle::dir1, (absref absref::*)&rectangle::dir2};
+
+absref_transmit rectangle::get_components() {
+  return absref_transmit(4, aref_rct, qpt + qsl, aref);
 }
 
 rectangle::rectangle(const point& fpiv, vec fdir[2], vfloat fdim[2],
                      vfloat prec) {
-  pvecerror("rectangle::rectangle(point fpiv, vec fdir[2], vfloat fdim[2], "
-            "vfloat prec)");
+  pvecerror(
+      "rectangle::rectangle(point fpiv, vec fdir[2], vfloat fdim[2], "
+      "vfloat prec)");
   if (check_perp(fdir[0], fdir[1], prec) != 1) {
     mcerr << "rectangle::rectangle(point fpiv, vec fdir[2], vfloat fdim[2]):\n"
           << " error: sides are not perpendicular\n";
@@ -460,9 +456,9 @@ rectangle::rectangle(const point& fpiv, vec fdir[2], vfloat fdim[2],
   dir2 = unit_vec(fdir[1]);
   dim[0] = fdim[0];
   dim[1] = fdim[1];
-  //mcout<<"piv:\n"<<piv;
-  //mcout<<"dir[2](directions of sides):\n"<<dir[0]<<dir[1];
-  //mcout<<"dim (dimensions):"<<dim[0]<<' '<<dim[1]<<'\n';
+  // mcout<<"piv:\n"<<piv;
+  // mcout<<"dir[2](directions of sides):\n"<<dir[0]<<dir[1];
+  // mcout<<"dim (dimensions):"<<dim[0]<<' '<<dim[1]<<'\n';
   straight slh[4];
   slh[0] = straight(piv + dir1 * dim[0] / 2.0, dir2);
   slh[1] = straight(piv + dir2 * dim[1] / 2.0, -dir1);
@@ -477,20 +473,19 @@ std::ostream& operator<<(std::ostream& file, const rectangle& f) {
   Ifile << "piv:\n" << f.piv;
   Ifile << "dir1,2(directions of sides):\n" << f.dir1 << f.dir2;
   Ifile << "dim (dimensions):" << f.dim[0] << ' ' << f.dim[1] << '\n';
-  file << statcast(const polygon&, f);
+  file << static_cast<const polygon&>(f);
   indn.n -= 2;
   return file;
 }
 
-//             **** special quadrangle ****  for cathode strip shamber
+// **** special quadrangle ****  for cathode strip shamber
 
-absref absref::*(spquadr::aref_sp[4]) = {(absref absref::*)&spquadr::pn,
-                                         (absref absref::*)&spquadr::piv,
-                                         (absref absref::*)&spquadr::dir1,
-                                         (absref absref::*)&spquadr::dir2 };
+absref absref::* spquadr::aref_sp[4] = {
+    (absref absref::*)&spquadr::pn,   (absref absref::*)&spquadr::piv,
+    (absref absref::*)&spquadr::dir1, (absref absref::*)&spquadr::dir2};
 
-void spquadr::get_components(ActivePtr<absref_transmit>& aref_tran) {
-  aref_tran.pass(new absref_transmit(4, aref_sp, qpt + qsl, aref));
+absref_transmit spquadr::get_components() {
+  return absref_transmit(4, aref_sp, qpt + qsl, aref);
 }
 
 point spquadr::pt_angle_rad(vfloat rad, vfloat angle) {
@@ -541,9 +536,8 @@ std::ostream& operator<<(std::ostream& file, const spquadr& p) {
   Ifile << "dir2:\n";
   file << p.dir2;
   Ifile << " awidth=" << p.awidth << '\n';
-  file << statcast(const polygon&, p);
+  file << static_cast<const polygon&>(p);
   indn.n -= 2;
   return file;
 }
-
 }

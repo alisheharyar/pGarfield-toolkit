@@ -11,37 +11,29 @@ appear in all copies and in supporting documentation.
 The file is provided "as is" without express or implied warranty.
 */
 
-void trajestep_limit::range(int fs_cf0, vfloat rad, int& fs_cf1,
-                            vfloat& mrange) {
-  if (mrange < 0 || mrange > max_range) mrange = max_range;
-  fs_cf1 = fs_cf0;
-  if (fs_cf1 == 1) {
-    if (rad >= rad_for_straight) {
-      fs_cf1 = 0;
-      if (mrange / rad > max_straight_arange)
-        mrange = rad * max_straight_arange;
-    } else {
-      if (mrange / rad > max_circumf_arange) mrange = rad * max_circumf_arange;
-    }
-  }
+namespace Heed {
+
+absref absref::* trajestep::aref[4] = {(absref absref::*)&trajestep::currpos,
+                                       (absref absref::*)&trajestep::dir,
+                                       (absref absref::*)&trajestep::relcen,
+                                       (absref absref::*)&trajestep::mpoint};
+
+absref_transmit trajestep::get_components() {
+  return absref_transmit(4, aref);
 }
 
-absref absref::*(trajestep::aref[4]) = {(absref absref::*)&trajestep::currpos,
-                                        (absref absref::*)&trajestep::dir,
-                                        (absref absref::*)&trajestep::relcen,
-                                        (absref absref::*)&trajestep::mpoint };
-
-void trajestep::get_components(ActivePtr<absref_transmit>& aref_tran) {
-  aref_tran.pass(new absref_transmit(4, aref));
-}
-
-trajestep::trajestep(trajestep_limit* ftl, const point& fcurrpos,
-                     const vec& fdir, int fs_cf, const vec& frelcen,
+trajestep::trajestep(const vfloat fmax_range, const vfloat frad_for_straight,
+                     const vfloat fmax_straight_arange, 
+                     const vfloat fmax_circ_arange, const point& fcurrpos,
+                     const vec& fdir, const bool fcurved, const vec& frelcen,
                      vfloat fmrange, vfloat prec)
-    : tl(ftl),
+    : max_range(fmax_range),
+      rad_for_straight(frad_for_straight),
+      max_straight_arange(fmax_straight_arange),
+      max_circ_arange(fmax_circ_arange),
       currpos(fcurrpos),
       dir(),
-      s_cf(fs_cf),
+      curved(fcurved),
       relcen(frelcen),
       s_prec(1),
       mrange(fmrange) {
@@ -51,91 +43,96 @@ trajestep::trajestep(trajestep_limit* ftl, const point& fcurrpos,
     mrange = 0;
   } else {
     dir = unit_vec(fdir);
-    if (s_cf == 1) {
+    if (curved) {
       check_econd11a(check_perp(dir, relcen, prec), != 1,
                      "dir=" << dir << "relcen=" << relcen
                             << "fcurrpos=" << fcurrpos << "fdir=" << fdir,
                      mcerr);
     }
-    tl->range(s_cf, length(relcen), s_range_cf, mrange);
+    if (mrange < 0 || mrange > max_range) mrange = max_range;
+    s_range_cf = curved;
+    if (s_range_cf == 1) {
+      const vfloat r = relcen.length();
+      if (r >= rad_for_straight) {
+        s_range_cf = 0;
+        mrange = std::min(mrange, r * max_straight_arange);
+      } else {
+        mrange = std::min(mrange, r * max_circ_arange);
+      }
+    }
   }
 }
 
-trajestep::trajestep(const trajestep& fts,  // the new object will continue
-                     // propagation from the end point of the old one
-                     vfloat mrange)         // new range to travel
-    {
-  mfunname("trajestep::trajestep(const trajestep& fts, vfloat mrange)");
+trajestep::trajestep(const trajestep& fts, vfloat fmrange) {
+  mfunname("trajestep::trajestep(const trajestep& fts, vfloat fmrange)");
+  // Continue propagation from the end point of the old step.
   point fpos;
   vec fdir;
   vec frelcen;
   fts.Gnextpoint1(fts.mrange, fpos, fdir, frelcen);
   vfloat prec = 0.1;  // not important here
   *this =
-      trajestep(fts.tl.getver(), fpos, fdir, fts.s_cf, frelcen, mrange, prec);
+      trajestep(fts.max_range, fts.rad_for_straight,
+                fts.max_straight_arange, fts.max_circ_arange,
+                fpos, fdir, fts.curved, frelcen, fmrange, prec);
 }
 
 void trajestep::Gnextpoint(vfloat frange, point& fpos, vec& fdir) const {
   pvecerror("int trajestep::Gnextpoint(vfloat frange, point& fpos, vec& fdir)");
   check_econd12(frange, >, mrange, mcerr);
-  if (s_range_cf == 0)  // interpolation by straight line
-      {
+  if (s_range_cf == 0) {
+    // interpolation by straight line
     fpos = currpos + frange * dir;
-    if (s_cf == 0)  // no curvature
-        {
+    if (!curved) {
+      // no curvature
       fdir = dir;
-      return;
     } else {
-      vfloat ang = frange / length(relcen);
+      vfloat ang = frange / relcen.length();
       fdir = dir;
       fdir.turn(dir || relcen, ang);
-      return;
     }
   } else {
-    vfloat ang = frange / length(relcen);  // angle to turn
+    vfloat ang = frange / relcen.length();  // angle to turn
     fdir = dir;
     fdir.turn(dir || relcen, ang);  // direction at the end
     vec frelcen = relcen;
     frelcen.turn(dir || relcen, ang);
     fpos = currpos + relcen - frelcen;
-    return;
   }
 }
 
 void trajestep::Gnextpoint1(vfloat frange, point& fpos, vec& fdir,
                             vec& frelcen) const {
-  pvecerror("int trajestep::Gnextpoint(vfloat frange, point& fpos, vec& fdir, "
-            "vec& frelcen)");
+  pvecerror(
+      "int trajestep::Gnextpoint(vfloat frange, point& fpos, vec& fdir, "
+      "vec& frelcen)");
   check_econd12(frange, >, mrange, mcerr);
-  if (s_range_cf == 0)  // interpolation by straight line
-      {
+  if (s_range_cf == 0) {
+    // interpolation by straight line
     fpos = currpos + frange * dir;
-    if (s_cf == 0)  // no curvature
-        {
+    if (!curved) {
+      // no curvature
       fdir = dir;
       frelcen = relcen;  // whatever it is
-      return;
     } else {
-      vfloat ang = frange / length(relcen);
+      vfloat ang = frange / relcen.length();
       fdir = dir;
       fdir.turn(dir || relcen, ang);
       frelcen = relcen;
       frelcen.turn(dir || relcen, ang);
-      return;
     }
   } else {
-    vfloat ang = frange / length(relcen);  // angle to turn
+    vfloat ang = frange / relcen.length();  // angle to turn
     fdir = dir;
     fdir.turn(dir || relcen, ang);  // direction at the end
     frelcen = relcen;
     frelcen.turn(dir || relcen, ang);
     fpos = currpos + relcen - frelcen;
-    return;
   }
 }
 
 std::ostream& operator<<(std::ostream& file, const trajestep& f) {
-  Ifile << "trajestep: s_cf=" << f.s_cf << "\n";
+  Ifile << "trajestep: curved=" << f.curved << "\n";
   indn.n += 2;
   Ifile << "currpos:" << f.currpos << indn << "dir=" << f.dir << indn
         << "relcen=" << f.relcen << indn << "s_range_cf=" << f.s_range_cf
@@ -143,4 +140,5 @@ std::ostream& operator<<(std::ostream& file, const trajestep& f) {
         << "mpoint=" << f.mpoint;
   indn.n -= 2;
   return file;
+}
 }
